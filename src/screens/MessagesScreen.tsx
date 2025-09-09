@@ -57,8 +57,8 @@ export default function MessagesScreen() {
       {/* brand */}
       <View style={styles.brandWrap}>
         <Text style={styles.brand}>
-          <Text style={{ color: colors.brandGreen, fontWeight: '900' }}>patch </Text>
-          <Text style={{ color: colors.text, fontWeight: '900' }}>up</Text>
+          <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal' }}>patch</Text>
+          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up</Text>
         </Text>
       </View>
 
@@ -81,9 +81,22 @@ export default function MessagesScreen() {
 const AVATAR = 44;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  brandWrap: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  brand: { fontSize: 28, letterSpacing: 1 },
+  container: { 
+    flex: 1, 
+    backgroundColor: colors.bg 
+  },
+
+  brandWrap: { 
+    paddingHorizontal: 16, 
+    paddingTop: 36, 
+    paddingBottom: 8 
+  },
+
+  brand: { 
+    fontSize: 28, 
+    letterSpacing: 1 
+  },
+
   pageTitle: {
     color: colors.brandGreen,
     fontSize: 18,
@@ -96,7 +109,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
   },
-  sep: { height: 1, backgroundColor: colors.border, marginLeft: AVATAR + 16 },
+  sep: { 
+    height: 1, 
+    backgroundColor: 
+    colors.border, 
+    marginLeft: AVATAR + 16 
+  },
+  
   avatar: {
     width: AVATAR,
     height: AVATAR,

@@ -64,8 +64,8 @@ export default function HomeScreen() {
       {/* App Title */}
       <View style={{ width: '100%', alignItems: 'flex-start', paddingHorizontal: 24 }}>
         <Text style={styles.title}>
-          <Text style={{ color: '#44ff75', fontWeight: 'bold', fontFamily: 'Candal-Regular' }}>patch</Text>
-          <Text style={{ color: '#fff', fontWeight: 'bold', fontFamily: 'Candal-Regular' }}> up</Text>
+          <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal' }}>patch</Text>
+          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up</Text>
         </Text>
       </View>
 
@@ -127,10 +127,53 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { paddingTop: 50, paddingVertical: 32, alignItems: 'center', backgroundColor: '#181818', flexGrow: 1, minHeight: '100%' },
-  title: { fontSize: 34, marginBottom: 14, marginTop: 14, letterSpacing: 1, flexDirection: 'row' },
-  bleSection: { width: '92%', marginTop: 42, backgroundColor: '#101010', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#222', minHeight: 130, alignSelf: 'center', marginBottom: 40 },
-  bleLabel: { color: '#fff', textAlign: 'center', marginBottom: 18 },
-  bleButton: { backgroundColor: '#44ff75', paddingHorizontal: 22, paddingVertical: 10, borderRadius: 8, alignSelf: 'center', marginTop: 10 },
-  bleButtonText: { color: '#181818', fontWeight: 'bold', fontSize: 15 },
+  container: { 
+    paddingTop: 50, 
+    paddingVertical: 32, 
+    alignItems: 'center', 
+    backgroundColor: '#101010', 
+    flexGrow: 1, minHeight: '100%' 
+  },
+
+  title: { 
+    fontSize: 28, 
+    marginBottom: 14, 
+    marginTop: -4, 
+    letterSpacing: 1, 
+    flexDirection: 'row' 
+  },
+
+  bleSection: {
+     width: '92%', 
+     marginTop: 42, 
+     backgroundColor: '#101010', 
+     borderRadius: 16, 
+     padding: 28, 
+     borderWidth: 1, 
+     borderColor: '#9c9c9cff', 
+     minHeight: 130, 
+     alignSelf: 'center', 
+     marginBottom: 40 
+    },
+
+  bleLabel: { 
+    color: '#fff', 
+    textAlign: 'center', 
+    marginBottom: 18 
+  },
+
+  bleButton: { 
+    backgroundColor: '#44ff75', 
+    paddingHorizontal: 22, 
+    paddingVertical: 10, 
+    borderRadius: 8, 
+    alignSelf: 'center', 
+    marginTop: 10 
+  },
+
+  bleButtonText: { 
+    color: '#181818', 
+    fontWeight: 'bold', 
+    fontSize: 15 
+  },
 });
