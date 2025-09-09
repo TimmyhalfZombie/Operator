@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, PermissionsAndroid, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import BLEDeviceCard from '../components/BLEDeviceCard';
 import TemperatureDial from '../components/TemperatureDial';
 import { useBleScanner } from '../features/useBLEscanner';
+import OperateScreen from '../screens/OperateScreen';
 
 export default function HomeScreen() {
   const {
@@ -12,9 +13,15 @@ export default function HomeScreen() {
     stopScan,
     connectToDevice,
     connectedDeviceId,
-    writeLed,
-    needsBluetooth, 
+    needsBluetooth,
   } = useBleScanner();
+
+  const [showOperator, setShowOperator] = useState(false);
+
+  // If the device disconnects, go back to scanner view automatically
+  useEffect(() => {
+    if (!connectedDeviceId) setShowOperator(false);
+  }, [connectedDeviceId]);
 
   // Ask runtime permissions before scanning
   const handleScanPress = async () => {
@@ -31,18 +38,27 @@ export default function HomeScreen() {
         result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED;
 
       if (!allGranted) {
-        Alert.alert(
-          'Permissions needed',
-          'Please grant Bluetooth & Location permissions to scan for devices.'
-        );
+        Alert.alert('Permissions needed','Please grant Bluetooth & Location permissions to scan for devices.');
         return;
       }
     }
-
-    // Permissions are OK (or iOS) — start scanning
     startScan();
   };
 
+  const handleStart = () => {
+    if (!connectedDeviceId) {
+      Alert.alert('Not connected', 'Connect to a device first.');
+      return;
+    }
+    setShowOperator(true); // ← switch Home to show the Operator panel
+  };
+
+  // ── If we’re showing the operator panel, render it and keep the Home tab active
+  if (connectedDeviceId && showOperator) {
+    return <OperateScreen />; // same UI you showed on your separate operator route
+  }
+
+  // ── Otherwise show the scanner UI (original Home content)
   return (
     <ScrollView contentContainerStyle={styles.container}>
       {/* App Title */}
@@ -54,11 +70,9 @@ export default function HomeScreen() {
       </View>
 
       {/* Temperature Dial */}
-    {/* Temperature Dial */}
-<View style={{ marginTop: 60 }}>
-  <TemperatureDial />
-</View>
-
+      <View style={{ marginTop: 60 }}>
+        <TemperatureDial />
+      </View>
 
       {/* BLE Section */}
       <View style={styles.bleSection}>
@@ -89,14 +103,14 @@ export default function HomeScreen() {
               />
             ))}
 
-            {/* Keep Start (LED) if connected */}
+            {/* Show START only when connected */}
             {connectedDeviceId && (
               <TouchableOpacity style={styles.bleButton} onPress={handleStart}>
-                <Text style={styles.bleButtonText}>Start</Text>
+                <Text style={styles.bleButtonText}>START</Text>
               </TouchableOpacity>
             )}
 
-            {/* Always show a scan toggle button */}
+            {/* Scan toggle */}
             <TouchableOpacity
               style={styles.bleButton}
               onPress={scanning ? stopScan : handleScanPress}
@@ -113,49 +127,10 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingTop: 50,
-    paddingVertical: 32,
-    alignItems: 'center',
-    backgroundColor: '#181818',
-    flexGrow: 1,
-    minHeight: '100%',
-  },
-  title: {
-    fontSize: 34,
-    marginBottom: 14,
-    marginTop: 14,
-    letterSpacing: 1,
-    flexDirection: 'row',
-  },
-  bleSection: {
-    width: '92%',
-    marginTop: 42,
-    backgroundColor: '#101010',
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#222',
-    minHeight: 130,
-    alignSelf: 'center',
-    marginBottom: 40,
-  },
-  bleLabel: {
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 18,
-  },
-  bleButton: {
-    backgroundColor: '#44ff75',
-    paddingHorizontal: 22,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignSelf: 'center',
-    marginTop: 10,
-  },
-  bleButtonText: {
-    color: '#181818',
-    fontWeight: 'bold',
-    fontSize: 15,
-  },
+  container: { paddingTop: 50, paddingVertical: 32, alignItems: 'center', backgroundColor: '#181818', flexGrow: 1, minHeight: '100%' },
+  title: { fontSize: 34, marginBottom: 14, marginTop: 14, letterSpacing: 1, flexDirection: 'row' },
+  bleSection: { width: '92%', marginTop: 42, backgroundColor: '#101010', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#222', minHeight: 130, alignSelf: 'center', marginBottom: 40 },
+  bleLabel: { color: '#fff', textAlign: 'center', marginBottom: 18 },
+  bleButton: { backgroundColor: '#44ff75', paddingHorizontal: 22, paddingVertical: 10, borderRadius: 8, alignSelf: 'center', marginTop: 10 },
+  bleButtonText: { color: '#181818', fontWeight: 'bold', fontSize: 15 },
 });

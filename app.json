@@ -8,32 +8,53 @@
     "scheme": "operator",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "assetBundlePatterns": [
-      "assets/fonts/*"
-    ],
+
+    "assetBundlePatterns": ["assets/**/*"],
+
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+
     "ios": {
       "supportsTablet": true
     },
+
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff",
+        "monochromeImage": "./assets/images/adaptive-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.shemuuu.Operator"
+      "package": "com.shemuuu.Operator",
+
+      "splash": {
+        "image": "./assets/images/splash.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#ffffff"
+      },
+
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT"
+      ]
     },
+
     "web": {
       "bundler": "metro",
       "output": "static",
       "favicon": "./assets/images/icon.png"
     },
+
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/splash.png",
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
@@ -41,8 +62,16 @@
       "react-native-ble-plx",
       "expo-font"
     ],
+
     "experiments": {
       "typedRoutes": true
+    },
+
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2e5e73da-40e1-4d42-8c93-5e112a1291a3"
+      }
     }
   }
 }
