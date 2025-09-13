@@ -1,76 +1,74 @@
 {
   "expo": {
-    "name": "Operator",
-    "slug": "Operator",
+    "name": "Operator",          
+    "slug": "Operator",               
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "operator",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-
+    "newArchEnabled": false,
     "assetBundlePatterns": ["assets/**/*"],
+    "sdkVersion": "53.0.0",
 
     "splash": {
-      "image": "./assets/images/splash.png",
-      "resizeMode": "cover",
-      "backgroundColor": "#ffffff"
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
     },
 
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to scan and connect to your vulcanizer device.",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to communicate with your vulcanizer device."
+      }
     },
 
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.shemuuu.Operator",
-
-      "splash": {
-        "image": "./assets/images/splash.png",
-        "resizeMode": "cover",
-        "backgroundColor": "#ffffff"
-      },
-
+      "package": "com.shemuuu.operator",
       "permissions": [
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_CONNECT"
-      ]
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "splash": {
+        "image": "./assets/images/icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#000000"
+      }
     },
 
-    "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/icon.png"
-    },
+    "web": { "bundler": "metro", "output": "static", "favicon": "./assets/images/icon.png" },
 
     "plugins": [
       "expo-router",
       [
-        "expo-splash-screen",
+        "expo-build-properties",
         {
-          "image": "./assets/images/splash.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 34,
+            "minSdkVersion": 24,
+            "packagingOptions": {
+              "pickFirst": ["META-INF/AL2.0", "META-INF/LGPL2.1"],
+              "exclude": ["META-INF/LICENSE*", "META-INF/NOTICE*"]
+            }
+          }
         }
-      ],
-      "react-native-ble-plx",
-      "expo-font"
+      ]
     ],
-
-    "experiments": {
-      "typedRoutes": true
-    },
 
     "extra": {
       "router": {},
-      "eas": {
-        "projectId": "2e5e73da-40e1-4d42-8c93-5e112a1291a3"
-      }
+      "eas": { "projectId": "2e5e73da-40e1-4d42-8c93-5e112a1291a3" }
     }
   }
 }

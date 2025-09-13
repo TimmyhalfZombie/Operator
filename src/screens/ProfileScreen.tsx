@@ -4,7 +4,7 @@ import Svg, { Path } from 'react-native-svg';
 import * as Icons from 'phosphor-react-native';
 
 const colors = {
-  bg: '#181818',
+  bg: '#101010',
   header: '#44ff75',
   chipBg: '#c7f7da', // soft mint
   chipText: '#0b0b0b',

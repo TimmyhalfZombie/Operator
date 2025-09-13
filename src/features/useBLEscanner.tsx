@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { BleManager, Device, State, Subscription, Characteristic } from 'react-native-ble-plx';
-import { Platform, PermissionsAndroid } from 'react-native';
 import { Buffer } from 'buffer';
+import { useEffect, useRef, useState } from 'react';
+import { PermissionsAndroid, Platform } from 'react-native';
+import { BleManager, Device, State, Subscription } from 'react-native-ble-plx';
 
 export function useBleScanner() {
   // Keep one manager instance per app runtime

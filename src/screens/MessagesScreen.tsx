@@ -3,7 +3,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import * as Icons from 'phosphor-react-native';
 
 const colors = {
-  bg: '#181818',
+  bg: '#101010',
   card: '#101010',
   border: '#222',
   brandGreen: '#44ff75',

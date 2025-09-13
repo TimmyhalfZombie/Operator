@@ -1,6 +1,9 @@
-import { Redirect } from 'expo-router';
+import { useEffect } from "react";
+import { router } from "expo-router";
 
 export default function Index() {
-  // Always land on the Home tab
-  return <Redirect href="/home" />;
+  useEffect(() => {
+    router.replace("/welcome");
+  }, []);
+  return null;
 }

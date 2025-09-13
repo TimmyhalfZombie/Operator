@@ -1,305 +1,320 @@
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import * as Icons from 'phosphor-react-native';
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, Dimensions, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
+// client/src/components/CurvedTabBar.tsx
+import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import * as Icons from "phosphor-react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Dimensions,
+  LayoutChangeEvent,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import Animated, {
+  Easing,
+  useAnimatedProps,
+  useAnimatedStyle,
+  useDerivedValue,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import Svg, { Path } from "react-native-svg";
 
-const BG = '#181818';          // screen background
-const BAR_BG = '#222';         // bar fill
-const BAR_BORDER = '#222';
-const ACTIVE = '#44FF75';      // mint green
-const INACTIVE = '#A9D9B0';    // soft mint for inactive
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-const { width: W } = Dimensions.get('window');
-const BAR_HEIGHT = 76;
-const CURVE_DEPTH = 0;         // flat bar top
+// Colors
+const BG = "#121212";
+const BAR_BG = "#1E1E1E";
+const BAR_BORDER = "#0A0A0A";
+const ACTIVE_GREEN = "#6EFF87";
+const INACTIVE_TEXT = "#B9B9B9";
 
-// Sizes / motion
-const ACTIVE_DOT = 60;         // green puck size
-const ICON_LIFT = -15         // increased lift to center icon on green circle
-const FROM_BELOW = 12;         // pop distance from below
-const PUCK_OFFSET_X = 8; 
-const PER_TAB_X = [0, -3.5, -5]; // per-tab puck X nudge if needed
+// Sizes
+const BAR_HEIGHT = 85; // Increased height for more space
+const ICON_BG = 50; // Slightly larger green circle
+const SAFE_TABS = new Set(["home", "messages", "profile"]);
 
-// Make all labels level (same top margin & line height)
-const LABEL_OFFSETS: Record<string, number> = {
-  Home: 8,
-  Messages: 8,
-  Profile: 8,
-};
+// Animation constants
+const HALO_LIFT_Y = -40; // Green circle positioned for visible notch
+const NOTCH_DEPTH = 5; // Visible notch cutout in the tab bar
+const HALO_PRESS_LIFT_Y = -40; // Slightly more lift when pressed
+const NOTCH_PRESS_DEPTH = 25; // Deeper cutout when pressed
+const HALO_OFFSET_X = -40;
 
-// Extra per-tab icon Y offsets (px). Positive = move DOWN a bit to match baselines.
-const ICON_OFFSETS: Record<string, number> = {
-  Home: 0,
-  Messages: 0,
-  Profile: 0,   // ⬅️ tiny push down to level with Home/Messages
-};
-
-// Per-tab active lift controls (px). Negative = move UP when active.
-const ACTIVE_ICON_LIFTS: Record<string, number> = {
-  Home: -24,
-  Messages: -22.5,
-  Profile: -24,
-};
-
-// Per-tab active horizontal controls (px). Negative = move LEFT, Positive = move RIGHT when active.
-const ACTIVE_ICON_X_OFFSETS: Record<string, number> = {
-  Home: 0,
-  Messages: -1,
-  Profile: 2.3,
-};
-
-function getIcon(name: string, focused: boolean, size = 22) {
-  const color = focused ? '#000000' : INACTIVE;
-  switch (name) {
-    case 'Home':
-      return <Icons.House weight={focused ? 'fill' : 'duotone'} size={size} color={color} />;
-    case 'Messages':
-      return <Icons.EnvelopeSimple weight={focused ? 'fill' : 'duotone'} size={size} color={color} />;
-    case 'Profile':
-      return <Icons.User weight={focused ? 'fill' : 'duotone'} size={size} color={color} />;
-    default:
-      return null;
-  }
+function toTitle(s: string) {
+  return s.replace(/(^|\s)\S/g, (c) => c.toUpperCase());
 }
 
-export default function CurvedTabBar(props: BottomTabBarProps) {
-  const { state, descriptors, navigation } = props;
-  const insets = useSafeAreaInsets();
+const AnimatedPath = Animated.createAnimatedComponent(Path);
 
-  // Only render the 3 tabs you want
-  const allowed = useMemo(() => new Set(['home', 'messages', 'profile']), []);
-  const routes = state.routes.filter(r => allowed.has(r.name.toLowerCase()));
+export default function CurvedTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  const routes = useMemo(() => state.routes.filter((r) => SAFE_TABS.has(r.name)), [state.routes]);
 
-  const tabCount = routes.length || 3;
-  const tabWidth = W / tabCount;
-  const centers = routes.map((_, i) => tabWidth * (i + 0.5));
-
-  // Animated index (drives horizontal center)
-  const animIndex = useRef(new Animated.Value(state.index)).current;
-
-  // Puck animation (vertical pop, scale, opacity)
-  const puckProgress = useRef(new Animated.Value(1)).current;
+  const [width, setWidth] = useState<number>(SCREEN_WIDTH);
+  const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
+  const widthSV = useSharedValue(SCREEN_WIDTH);
+  const tabWsv = useSharedValue(width / Math.max(routes.length, 1));
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(animIndex, {
-        toValue: state.index,
-        duration: 320,
-        easing: Easing.bezier(0.22, 0.61, 0.36, 1),
-        useNativeDriver: false,
-      }),
-      Animated.sequence([
-        Animated.timing(puckProgress, {
-          toValue: 0,
-          duration: 80,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: false,
-        }),
-        Animated.timing(puckProgress, {
-          toValue: 1,
-          duration: 220,
-          easing: Easing.bezier(0.22, 0.61, 0.36, 1),
-          useNativeDriver: false,
-        }),
-      ]),
-    ]).start();
-  }, [state.index, animIndex, puckProgress]);
+    widthSV.value = width;
+    tabWsv.value = width / Math.max(routes.length, 1);
+  }, [width, routes.length, widthSV, tabWsv]);
 
-  const notchX = animIndex.interpolate({
-    inputRange: routes.map((_, i) => i),
-    outputRange: centers,
-  });
+  const activeIndex = Math.max(0, routes.findIndex((r) => r.key === state.routes[state.index].key));
+  const activeIndexSV = useSharedValue(activeIndex);
+  useEffect(() => {
+    activeIndexSV.value = activeIndex;
+  }, [activeIndex, activeIndexSV]);
 
-  const puckTranslateY = puckProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [FROM_BELOW, -ICON_LIFT],
-  });
-  const puckScale = puckProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.75, 1],
-  });
-  const puckAlpha = puckProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
+  const notchCenterX = useSharedValue(activeIndex * tabWsv.value + tabWsv.value / 2);
+  const haloX = useSharedValue(activeIndex * tabWsv.value);
+  const haloLiftY = useSharedValue(0);
+  const notchDepthSV = useSharedValue(NOTCH_DEPTH);
+
+  useEffect(() => {
+    const tabW = width / Math.max(routes.length, 1);
+    const center = activeIndex * tabW + tabW / 2;
+
+    notchCenterX.value = withTiming(center, { duration: 300, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) });
+    haloX.value = withTiming(activeIndex * tabW, { duration: 300, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) });
+
+    widthSV.value = width;
+    tabWsv.value = tabW;
+  }, [activeIndex, routes, width, haloX, notchCenterX, widthSV, tabWsv]);
+
+  useDerivedValue(() => {
+    "worklet";
+    const _ = activeIndexSV.value;
+    haloLiftY.value = withTiming(HALO_LIFT_Y, { duration: 300, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) });
+    notchDepthSV.value = withTiming(NOTCH_DEPTH, { duration: 300, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) });
   });
 
-  const puckTabOffset = animIndex.interpolate({
-    inputRange: routes.map((_, i) => i),
-    outputRange: PER_TAB_X,
+  const animatedPath = useAnimatedProps(() => {
+    "worklet";
+    function buildPath(W: number, H: number, cx: number, notchW: number, notchD: number, radius: number): string {
+      "worklet";
+      const left = 0, right = W, top = 0, bottom = H;
+      const nHalf = notchW / 2;
+      const nStart = Math.max(radius, cx - nHalf);
+      const nEnd = Math.min(W - radius, cx + nHalf);
+      const k = 0.551915024494;
+
+      const brx = right - radius;
+      const bry = bottom;
+      const try_ = top + radius;
+
+      return (
+        `M ${left} ${bottom - radius}` +
+        ` C ${left} ${bottom - radius * (1 - k)} ${left + radius * (1 - k)} ${bottom} ${left + radius} ${bottom}` +
+        ` L ${brx} ${bry}` +
+        ` C ${right - radius * (1 - k)} ${bottom} ${right} ${bottom - radius * (1 - k)} ${right} ${bottom - radius}` +
+        ` L ${right} ${try_}` +
+        ` C ${right} ${top + radius * (1 - k)} ${right - radius * (1 - k)} ${top} ${right - radius} ${top}` +
+        ` L ${nEnd - 15} ${top}` +
+        ` C ${nEnd - 10} ${top - 3} ${nEnd - 5} ${top - 2} ${nEnd - 2} ${top - 1}` +
+        ` C ${nEnd - 1} ${top} ${nEnd} ${top + 1} ${nEnd} ${top + 2}` +
+        ` A ${nHalf} ${nHalf} 0 0 1 ${cx + nHalf} ${top + notchD}` +
+        ` A ${nHalf} ${nHalf} 0 0 1 ${nStart} ${top + 2}` +
+        ` C ${nStart} ${top + 1} ${nStart + 1} ${top} ${nStart + 2} ${top - 1}` +
+        ` C ${nStart + 5} ${top - 2} ${nStart + 10} ${top - 3} ${nStart + 15} ${top}` +
+        ` L ${left + radius} ${top}` +
+        ` C ${left + radius * (1 - k)} ${top} ${left} ${top + radius * (1 - k)} ${left} ${top + radius}` +
+        ` L ${left} ${bottom - radius} Z`
+      );
+    }
+
+    const W = widthSV.value;
+    const tabW = tabWsv.value;
+    const notchW = ICON_BG + 20; // Wider notch to match the image
+    const notchD = notchDepthSV.value;
+    const r = 16;
+    const cx = notchCenterX.value;
+
+    return { d: buildPath(W, BAR_HEIGHT, cx, notchW, notchD, r) };
   });
 
-  const pathD = React.useMemo(() => {
-    const h = BAR_HEIGHT;
-    const w = W;
-    const topY = 0;
-    const dip = CURVE_DEPTH;
-    const c1x = w * 0.35;
-    const c2x = w * 0.65;
-    return [
-      `M 0 ${topY}`,
-      `L ${w * 0.25} ${topY}`,
-      `C ${c1x} ${topY} ${w * 0.45} ${topY + dip} ${w * 0.5} ${topY + dip}`,
-      `C ${w * 0.55} ${topY + dip} ${c2x} ${topY} ${w * 0.75} ${topY}`,
-      `L ${w} ${topY}`,
-      `L ${w} ${h}`,
-      `L 0 ${h}`,
-      'Z',
-    ].join(' ');
-  }, []);
+  const haloStyle = useAnimatedStyle(() => {
+    "worklet";
+    return {
+      transform: [
+        { translateX: haloX.value + (tabWsv.value - ICON_BG) / 2 + HALO_OFFSET_X },
+        { translateY: haloLiftY.value },
+      ],
+    };
+  });
+
+  const iconOpacityStyle = (index: number) =>
+    useAnimatedStyle(() => {
+      "worklet";
+      const isActive = activeIndexSV.value === index;
+      return { opacity: withTiming(isActive ? 0 : 1, { duration: 140 }) };
+    }, []);
+
+  const handlePress = useCallback(
+    (routeName: string, routeKey: string, isFocused: boolean, index: number) => {
+      if (activeIndex === index) {
+        haloLiftY.value = withTiming(HALO_PRESS_LIFT_Y, { duration: 110, easing: Easing.out(Easing.cubic) }, () => {
+          haloLiftY.value = withTiming(HALO_LIFT_Y, { duration: 160, easing: Easing.out(Easing.cubic) });
+        });
+        notchDepthSV.value = withTiming(NOTCH_PRESS_DEPTH, { duration: 110 }, () => {
+          notchDepthSV.value = withTiming(NOTCH_DEPTH, { duration: 160 });
+        });
+      }
+
+      const event = navigation.emit({ type: "tabPress", target: routeKey, canPreventDefault: true });
+      if (!isFocused && !event.defaultPrevented) {
+        navigation.navigate(routeName as never);
+      }
+    },
+    [navigation, activeIndex, haloLiftY, notchDepthSV]
+  );
+
+  const activeRoute = routes[activeIndex] ?? routes[0];
+  const ActiveIconComp = (() => {
+    switch (activeRoute?.name) {
+      case "home":
+        return Icons.House;
+      case "messages":
+        return Icons.ChatCircleDots;
+      case "profile":
+        return Icons.UserCircle;
+      default:
+        return Icons.Circle;
+    }
+  })();
+
+  const tabWidth = width / Math.max(routes.length, 1);
 
   return (
-    <View style={[styles.wrapper, { paddingBottom: insets.bottom }]}>
-      {/* Bar background */}
-      <View style={styles.svgWrap}>
-        <Svg width={W} height={BAR_HEIGHT} style={{ position: 'absolute', bottom: 0 }}>
-          <Path d={pathD} fill={BAR_BG} stroke={BAR_BORDER} />
+    <Animated.View pointerEvents="box-none" style={{ backgroundColor: BG }}>
+      <View style={[styles.bar, { height: BAR_HEIGHT }]} onLayout={onLayout}>
+        {/* Notched background */}
+        <Svg
+          width="100%"
+          height={BAR_HEIGHT}
+          viewBox={`0 0 ${width} ${BAR_HEIGHT}`}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        >
+          <AnimatedPath
+            animatedProps={animatedPath}
+            fill={BAR_BG}
+            stroke={BAR_BORDER}
+            strokeWidth={StyleSheet.hairlineWidth}
+          />
         </Svg>
+
+        {/* Lifted halo */}
+        <Animated.View
+          style={[styles.haloContainer, { width: tabWidth, height: BAR_HEIGHT }, haloStyle]}
+          pointerEvents="none"
+        >
+          <View style={styles.halo}>
+            <ActiveIconComp size={24} color={"#0C0C0C"} weight="fill" />
+          </View>
+        </Animated.View>
+
+        {/* Tabs */}
+        <View style={styles.row}>
+          {routes.map((route, index) => {
+            const isFocused = activeIndex === index;
+            const options = descriptors[route.key]?.options ?? {};
+            const raw =
+              options.tabBarLabel ??
+              options.title ??
+              (route.name === "messages" ? "Messages" : toTitle(route.name));
+            const label = typeof raw === "string" ? raw : toTitle(route.name);
+
+            let IconComp: any;
+            switch (route.name) {
+              case "home":
+                IconComp = Icons.HouseSimple;
+                break;
+              case "messages":
+                IconComp = Icons.ChatCircle;
+                break;
+              case "profile":
+                IconComp = Icons.User;
+                break;
+              default:
+                IconComp = Icons.Circle;
+            }
+
+            return (
+              <TouchableOpacity
+                key={route.key}
+                style={[styles.tab, { width: tabWidth }]}
+                activeOpacity={0.9}
+                onPress={() => handlePress(route.name, route.key, isFocused, index)}
+                accessibilityRole="button"
+                accessibilityState={isFocused ? { selected: true } : {}}
+                accessibilityLabel={options.tabBarAccessibilityLabel}
+                testID={options.tabBarTestID}
+              >
+                <View style={styles.tabInner}>
+                  <Animated.View style={iconOpacityStyle(index)}>
+                    <IconComp size={24} color={INACTIVE_TEXT} />
+                  </Animated.View>
+                  <Text style={[styles.label, isFocused && styles.labelActive]}>
+                    {label}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
-
-      {/* Single green puck */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.activeDot,
-          {
-            left: Animated.add(
-              Animated.subtract(notchX, ACTIVE_DOT / 2),
-              Animated.add(puckTabOffset, new Animated.Value(PUCK_OFFSET_X))
-            ),
-            transform: [{ translateY: puckTranslateY }, { scale: puckScale }],
-            opacity: puckAlpha,
-            backgroundColor: ACTIVE,
-            borderColor: BG,
-            zIndex: 0,
-            elevation: 0,
-          },
-        ]}
-      />
-
-      {/* Tabs */}
-      <View style={styles.row}>
-        {routes.map((route, i) => {
-          const { options } = descriptors[route.key];
-          const rawLabel =
-            (options.tabBarLabel as string) ??
-            (options.title as string) ??
-            route.name;
-          const labelForIcon = rawLabel.trim().toLowerCase().replace(/^\w/, c => c.toUpperCase());
-
-          const isFocused = state.index === state.routes.findIndex(r => r.key === route.key);
-
-          // Icon rides with the puck (lift up on focus)
-          const iconLift = animIndex.interpolate({
-            inputRange: routes.map((_, idx) => idx),
-            outputRange: routes.map((_, idx) => (idx === i ? -ICON_LIFT : 0)),
-          });
-
-          // Additional lift for active icon to center on green circle
-          const activeIconLift = isFocused ? (ACTIVE_ICON_LIFTS[rawLabel] ?? 0) : 0;
-          
-          // Additional horizontal offset for active icon
-          const activeIconXOffset = isFocused ? (ACTIVE_ICON_X_OFFSETS[rawLabel] ?? 0) : 0;
-
-          const onPress = () => {
-            const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-            if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
-          };
-          const onLongPress = () => navigation.emit({ type: 'tabLongPress', target: route.key });
-
-          return (
-            <Pressable
-              key={route.key}
-              accessibilityRole="button"
-              accessibilityState={isFocused ? { selected: true } : {}}
-              onPress={onPress}
-              onLongPress={onLongPress}
-              style={[styles.tab, { width: tabWidth }]}
-            >
-              {/* Fixed-height content box ensures consistent baselines */}
-              <View style={styles.tabContent}>
-                {/* Icon = (animated lift) + per-tab static offset (Profile down) */}
-                <Animated.View
-                  style={{
-                    transform: [
-                      { translateY: Animated.add(
-                        iconLift, 
-                        new Animated.Value((ICON_OFFSETS[rawLabel] ?? 0) + activeIconLift)
-                      ) },
-                      { translateX: new Animated.Value(activeIconXOffset) }
-                    ],
-                    position: 'relative', zIndex: 20, elevation: 20,
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  {getIcon(labelForIcon, isFocused, isFocused ? 32 : 22)}
-                </Animated.View>
-
-                {/* Label — all level */}
-                <Text
-                  style={[
-                    styles.label,
-                    {
-                      color: isFocused ? ACTIVE : INACTIVE,
-                      marginTop: LABEL_OFFSETS[rawLabel] ?? 8,
-                    },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {rawLabel}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  svgWrap: { height: BAR_HEIGHT },
-
+  bar: {
+    width: "100%",
+    overflow: "visible",
+    justifyContent: "center",
+  },
   row: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 30,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-evenly',
-    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around", // evenly spaced, center aligned
   },
-
-  // Green moving circle
-  activeDot: {
-    position: 'absolute',
-    top: -ACTIVE_DOT / 2,
-    width: ACTIVE_DOT,
-    height: ACTIVE_DOT,
-    borderRadius: ACTIVE_DOT / 2,
-    borderWidth: 2,
-  },
-
   tab: {
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginLeft: -3.5, // your layout tweak kept
+    height: BAR_HEIGHT,
+    alignItems: "center", // center each tab’s content
+    justifyContent: "center",
   },
-
-  // 👇 fixed box so icon+label all share a consistent baseline
-  tabContent: {
-    height: 56,                // controls the common baseline
-    alignItems: 'center',
-    justifyContent: 'flex-end' // stack at bottom together
+  tabInner: {
+    height: 52,
+    minWidth: 64,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    transform: [{ translateY: -6 }], // lift slightly
   },
-
   label: {
-    fontSize: 14,
-    lineHeight: 16,            // consistent text box height
-    fontWeight: '600',
+    fontSize: 12,
+    color: INACTIVE_TEXT,
+  },
+  labelActive: {
+    color: ACTIVE_GREEN,
+    fontWeight: "600",
+  },
+  haloContainer: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  halo: {
+    width: ICON_BG,
+    height: ICON_BG,
+    borderRadius: ICON_BG / 2,
+    backgroundColor: ACTIVE_GREEN,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
