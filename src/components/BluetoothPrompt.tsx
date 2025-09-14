@@ -31,14 +31,62 @@ export default function BluetoothPrompt({ visible, onOpenSettings, onDismiss }: 
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
-  card: { width: '88%', backgroundColor: '#101010', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#222' },
-  title: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
-  body: { color: '#cfcfcf', marginBottom: 14, lineHeight: 20 },
-  row: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
-  btn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10 },
-  btnGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#333' },
-  btnGhostText: { color: '#cfcfcf', fontWeight: '600' },
-  btnPrimary: { backgroundColor: '#44ff75' },
-  btnPrimaryText: { color: '#111', fontWeight: '700' },
+  backdrop: {
+     flex: 1, 
+     backgroundColor: 'rgba(0,0,0,0.6)', 
+     alignItems: 'center', 
+     justifyContent: 'center' 
+    },
+
+  card: {
+     width: '88%',
+      backgroundColor: '#101010', 
+      borderRadius: 16, 
+      padding: 18, 
+      borderWidth: 1, 
+      borderColor: '#222' 
+    },
+
+  title: {
+     color: '#fff', 
+     fontSize: 18, 
+     fontWeight: 'bold',
+      marginBottom: 6 
+    },
+
+  body: { 
+    color: '#cfcfcf',
+     marginBottom: 14, 
+     lineHeight: 20 
+    },
+
+  row: { 
+    flexDirection: 'row', 
+    justifyContent: 'flex-end',
+    gap: 10 
+  },
+
+  btn: { 
+    paddingVertical: 10,
+     paddingHorizontal: 14, 
+     borderRadius: 10 
+    },
+
+  btnGhost: { 
+    backgroundColor: 'transparent', 
+    borderWidth: 1, 
+    borderColor: '#333'
+   },
+
+  btnGhostText: { 
+    color: '#cfcfcf', 
+    fontWeight: '600'
+   },
+  btnPrimary: {
+     backgroundColor: '#44ff75' 
+    },
+  btnPrimaryText: { 
+    color: '#111', 
+    fontWeight: '700' 
+  },
 });

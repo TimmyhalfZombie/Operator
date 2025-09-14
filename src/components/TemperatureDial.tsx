@@ -5,11 +5,40 @@ import Svg, { Circle, G, Line, Polygon } from 'react-native-svg';
 type Props = {
   size?: number;      // overall diameter
   valueText?: string; // center text; e.g. "0°"
+  isHeating?: boolean; // whether the app is in heating state
+  isRetracting?: boolean; // whether the app is in retracting state
 };
 
-export default function TemperatureDial({ size = 240, valueText = '0°' }: Props) {
+export default function TemperatureDial({ size = 240, valueText = '0°', isHeating = false, isRetracting = false }: Props) {
   const cx = size / 2;
   const cy = size / 2;
+  
+  // Simple number counting
+  const [phaseNumber, setPhaseNumber] = React.useState(0);
+  
+  React.useEffect(() => {
+    if (isHeating) {
+      // Cycle through numbers 1-3 for center text (heating)
+      const interval = setInterval(() => {
+        setPhaseNumber(prev => (prev % 3) + 1);
+      }, 1000);
+      
+      return () => clearInterval(interval);
+    } else if (isRetracting) {
+      // Countdown from 3 to 0 for center text (retracting)
+      setPhaseNumber(3);
+      const interval = setInterval(() => {
+        setPhaseNumber(prev => {
+          if (prev <= 0) return 0; // stop at 0
+          return prev - 1;
+        });
+      }, 1000);
+      
+      return () => clearInterval(interval);
+    } else {
+      setPhaseNumber(0);
+    }
+  }, [isHeating, isRetracting]);
 
   // ring sizes
   const outerStroke = 20;       // dark outer ring width
@@ -86,22 +115,27 @@ export default function TemperatureDial({ size = 240, valueText = '0°' }: Props
 
         {/* Center value text */}
         <View style={styles.centerWrap} pointerEvents="none">
-          <Text style={styles.valueText}>{valueText}</Text>
+          <Text style={styles.valueText}>
+            {isHeating || isRetracting ? `${phaseNumber}°C` : valueText}
+          </Text>
         </View>
 
-        {/* Green knob at very bottom */}
+        {/* Green knob with triangular pointer - static at bottom */}
         <View
           style={[
-            styles.knob,
+            styles.knobContainer,
             {
-              width: knobRadius * 2,
-              height: knobRadius * 2,
-              borderRadius: knobRadius,
               left: cx - knobRadius,
-              top: size - knobRadius * 2 - 6, // slight inset from edge
+              top: size - knobRadius * 2 - 6,
             },
           ]}
-        />
+        >
+          {/* White triangular pointer above knob */}
+          <View style={styles.triangularPointer} />
+          
+          {/* Green knob */}
+          <View style={styles.knob} />
+        </View>
       </View>
     </View>
   );
@@ -110,7 +144,10 @@ export default function TemperatureDial({ size = 240, valueText = '0°' }: Props
 const styles = StyleSheet.create({
   centerWrap: {
     position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -118,11 +155,28 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 44,
     fontWeight: 'bold',
-    // if you loaded Candal globally you can uncomment:
-    // fontFamily: 'Candal',
+    fontFamily: 'Candal',
+  },
+  knobContainer: {
+    position: 'absolute',
+  },
+  triangularPointer: {
+    position: 'absolute',
+    top: -8,
+    left: 14, // (36 - 8) / 2 = 14 to center the triangle
+    width: 0,
+    height: 0,
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderBottomWidth: 8,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#ffffff',
   },
   knob: {
-    position: 'absolute',
+    width: 36, // knobRadius * 2 = 18 * 2
+    height: 36, // knobRadius * 2 = 18 * 2
+    borderRadius: 18, // knobRadius
     backgroundColor: '#50ff84',
     borderWidth: 3,
     borderColor: '#1b1b1b',

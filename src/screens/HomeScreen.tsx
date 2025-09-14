@@ -70,7 +70,7 @@ export default function HomeScreen() {
       </View>
 
       {/* Temperature Dial */}
-      <View style={{ marginTop: 60 }}>
+      <View style={{ marginTop: 40 }}>
         <TemperatureDial />
       </View>
 
@@ -81,8 +81,8 @@ export default function HomeScreen() {
             <Text style={styles.bleLabel}>
               {needsBluetooth ? 'Please turn on Bluetooth to scan.' : 'No BLE device found.'}
             </Text>
-            <TouchableOpacity style={styles.bleButton} onPress={handleScanPress}>
-              <Text style={styles.bleButtonText}>Scan for device</Text>
+            <TouchableOpacity style={styles.scanButton} onPress={handleScanPress}>
+              <Text style={styles.scanButtonText}>Scan for device</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -105,17 +105,17 @@ export default function HomeScreen() {
 
             {/* Show START only when connected */}
             {connectedDeviceId && (
-              <TouchableOpacity style={styles.bleButton} onPress={handleStart}>
-                <Text style={styles.bleButtonText}>START</Text>
+              <TouchableOpacity style={styles.startButton} onPress={handleStart}>
+                <Text style={styles.startButtonText}>START</Text>
               </TouchableOpacity>
             )}
 
             {/* Scan toggle */}
             <TouchableOpacity
-              style={styles.bleButton}
+              style={styles.scanButton}
               onPress={scanning ? stopScan : handleScanPress}
             >
-              <Text style={styles.bleButtonText}>
+              <Text style={styles.scanButtonText}>
                 {scanning ? 'Stop Scanning' : 'Scan for device'}
               </Text>
             </TouchableOpacity>
@@ -145,7 +145,7 @@ const styles = StyleSheet.create({
 
   bleSection: {
      width: '92%', 
-     marginTop: 42, 
+     marginTop: 22, 
      backgroundColor: '#101010', 
      borderRadius: 16, 
      padding: 28, 
@@ -168,12 +168,56 @@ const styles = StyleSheet.create({
     paddingVertical: 10, 
     borderRadius: 8, 
     alignSelf: 'center', 
-    marginTop: 10 
+    marginTop: 10,
+    minWidth: 140,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center'
   },
 
   bleButtonText: { 
     color: '#181818', 
     fontWeight: 'bold', 
-    fontSize: 15 
+    fontSize: 15,
+    textAlign: 'center',
+    fontFamily: 'Inter'
+  },
+  startButton: { 
+    backgroundColor: '#44ff75', 
+    paddingHorizontal: 22, 
+    paddingVertical: 10, 
+    borderRadius: 8, 
+    alignSelf: 'center', 
+    marginTop: 10,
+    minWidth: 140,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  startButtonText: { 
+    color: '#181818', 
+    fontWeight: 'bold', 
+    fontSize: 15,
+    textAlign: 'center',
+    fontFamily: 'Inter'
+  },
+  scanButton: { 
+    backgroundColor: '#352b2eff', 
+    paddingHorizontal: 22, 
+    paddingVertical: 10, 
+    borderRadius: 8, 
+    alignSelf: 'center', 
+    marginTop: 10,
+    minWidth: 140,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  scanButtonText: { 
+    color: '#ffffffff', 
+    fontWeight: 'bold', 
+    fontSize: 15,
+    textAlign: 'center',
+    fontFamily: 'Inter'
   },
 });

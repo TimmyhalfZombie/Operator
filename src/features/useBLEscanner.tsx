@@ -11,6 +11,10 @@ export function useBleScanner() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(null);
   const [needsBluetooth, setNeedsBluetooth] = useState(false);
+  
+  // Universal scanning state
+  const [universalScanning, setUniversalScanning] = useState(false);
+  const [universalDevices, setUniversalDevices] = useState<Device[]>([]);
 
   // UUIDs (match your ESP32)
   const LED_SERVICE_UUID = 'c191e8aa-fb8a-4c7a-8750-5eb91c7c794a';
@@ -199,6 +203,74 @@ export function useBleScanner() {
     console.log('Manual scan stop.');
   };
 
+  // Universal scanning functions - scan for any BLE device
+  const startUniversalScan = async () => {
+    await requestPermissions();
+
+    const state = await bleManager.state();
+    if (state !== State.PoweredOn) {
+      setNeedsBluetooth(true);
+      return;
+    }
+
+    // Stop any existing scan first
+    bleManager.stopDeviceScan();
+
+    setUniversalDevices([]);
+    setUniversalScanning(true);
+    setNeedsBluetooth(false);
+    console.log('Starting universal BLE scan for any device...');
+
+    // Scan for any BLE device without UUID filter
+    bleManager.startDeviceScan(null, null, (error, device) => {
+      if (error) {
+        console.log('Universal scan error:', error.message);
+        setUniversalScanning(false);
+        return;
+      }
+      if (device) {
+        // Add any device found, regardless of name or UUID
+        setUniversalDevices(prev => (prev.some(d => d.id === device.id) ? prev : [...prev, device]));
+        console.log('Universal scan found device:', device.name || 'Unknown', device.id);
+      }
+    });
+
+    // Auto-stop after 30s for universal scan
+    setTimeout(() => {
+      bleManager.stopDeviceScan();
+      setUniversalScanning(false);
+      console.log('Universal scan stopped.');
+    }, 30000);
+  };
+
+  const stopUniversalScan = () => {
+    bleManager.stopDeviceScan();
+    setUniversalScanning(false);
+    console.log('Manual universal scan stop.');
+  };
+
+  // Universal connection - connect to any BLE device
+  const connectToUniversalDevice = async (device: Device) => {
+    try {
+      stopUniversalScan();
+      const connected = await bleManager.connectToDevice(device.id, { timeout: 10000 });
+      await connected.discoverAllServicesAndCharacteristics();
+      setConnectedDeviceId(connected.id);
+      console.log('UNIVERSAL DEVICE CONNECTED:', connected.id, connected.name || 'Unknown');
+
+      // Try to start notifications if the device has our expected service
+      try {
+        await startNotifications();
+      } catch (e) {
+        console.log('Could not start notifications - device may not support our service:', e);
+      }
+    } catch (e) {
+      console.log('Universal connect error:', e);
+      setConnectedDeviceId(null);
+      stopNotifications();
+    }
+  };
+
   const connectToDevice = async (device: Device) => {
     try {
       stopScan();
@@ -236,5 +308,12 @@ export function useBleScanner() {
     // UI state
     needsBluetooth,
     setNeedsBluetooth,
+
+    // Universal scanning (new functionality)
+    universalDevices,
+    universalScanning,
+    startUniversalScan,
+    stopUniversalScan,
+    connectToUniversalDevice,
   };
 }
