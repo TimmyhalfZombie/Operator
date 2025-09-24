@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Operator",          
-    "slug": "Operator",               
+    "name": "Operator",
+    "slug": "Operator",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -44,9 +44,18 @@
         "resizeMode": "contain",
         "backgroundColor": "#000000"
       }
+
     },
 
-    "web": { "bundler": "metro", "output": "static", "favicon": "./assets/images/icon.png" },
+    "androidNavigationBar": {
+      "visible": "immersive" 
+    },
+
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/icon.png"
+    },
 
     "plugins": [
       "expo-router",

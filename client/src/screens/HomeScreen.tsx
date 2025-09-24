@@ -145,12 +145,12 @@ const styles = StyleSheet.create({
 
   bleSection: {
      width: '92%', 
-     marginTop: 22, 
+     marginTop: 30, 
      backgroundColor: '#101010', 
      borderRadius: 16, 
      padding: 28, 
-     borderWidth: 1, 
-     borderColor: '#9c9c9cff', 
+     borderWidth: 2, 
+     borderColor: '#473f3fff', 
      minHeight: 130, 
      alignSelf: 'center', 
      marginBottom: 40 

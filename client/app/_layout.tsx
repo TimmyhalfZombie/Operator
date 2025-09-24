@@ -2,12 +2,16 @@
 import { useFonts } from "expo-font";
 import * as NavigationBar from "expo-navigation-bar";
 import { Tabs } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect } from "react";
-import { ActivityIndicator, Platform, View } from "react-native";
+import React, { useCallback, useEffect } from "react";
+import { Platform } from "react-native";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import CurvedTabBar from "../src/components/CurvedTabBar";
+
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -29,24 +33,19 @@ export default function RootLayout() {
     }
   }, []);
 
+  // Hide splash screen when fonts are loaded
+  const onLayoutRootView = useCallback(async () => {
+    if (fontsLoaded) {
+      await SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded]);
+
   if (!fontsLoaded) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: "#000",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <StatusBar hidden />
-        <ActivityIndicator />
-      </View>
-    );
+    return null; // Keep showing the native splash screen
   }
 
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider onLayout={onLayoutRootView}>
       <StatusBar hidden />
       <Tabs
         tabBar={(p) => <CurvedTabBar {...p} />}
@@ -61,6 +60,7 @@ export default function RootLayout() {
         {/* Make sure these files exist:
             app/home.tsx, app/messages.tsx, app/profile.tsx */}
         <Tabs.Screen name="home" options={{ title: "Home" }} />
+        <Tabs.Screen name="activity" options={{ title: "Activity" }} />
         <Tabs.Screen name="messages" options={{ title: "Messages" }} />
         <Tabs.Screen name="profile" options={{ title: "Profile" }} />
       </Tabs>

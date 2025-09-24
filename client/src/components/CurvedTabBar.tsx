@@ -30,16 +30,20 @@ const ACTIVE_GREEN = "#6EFF87";
 const INACTIVE_TEXT = "#B9B9B9";
 
 // Sizes
-const BAR_HEIGHT = 85; // Increased height for more space
-const ICON_BG = 50; // Slightly larger green circle
-const SAFE_TABS = new Set(["home", "messages", "profile"]);
+const BAR_HEIGHT = 85;
+const ICON_BG = 50;
+const SAFE_TABS = new Set(["home", "activity", "messages", "profile"]);
 
 // Animation constants
-const HALO_LIFT_Y = -40; // Green circle positioned for visible notch
-const NOTCH_DEPTH = 5; // Visible notch cutout in the tab bar
-const HALO_PRESS_LIFT_Y = -40; // Slightly more lift when pressed
-const NOTCH_PRESS_DEPTH = 25; // Deeper cutout when pressed
-const HALO_OFFSET_X = -40;
+const HALO_LIFT_Y = -40;
+const NOTCH_DEPTH = 5;
+const HALO_PRESS_LIFT_Y = -40;
+const NOTCH_PRESS_DEPTH = 25;
+const HALO_OFFSET_X = -23;
+
+// Notch geometry
+const RADIUS = 16;
+const NOTCH_WIDTH = ICON_BG + 20;
 
 function toTitle(s: string) {
   return s.replace(/(^|\s)\S/g, (c) => c.toUpperCase());
@@ -73,30 +77,52 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
 
   useEffect(() => {
     const tabW = width / Math.max(routes.length, 1);
-    const center = activeIndex * tabW + tabW / 2;
+    const rawCenter = activeIndex * tabW + tabW / 2;
+    let offset = 0;
 
-    notchCenterX.value = withTiming(center, { duration: 300, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) });
-    haloX.value = withTiming(activeIndex * tabW, { duration: 300, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) });
+    // ✅ Apply same offset to notch & halo when on "home"
+    const activeName = routes[activeIndex]?.name;
+    if (activeName === "home") {
+      offset = -2; // adjusted to move 13px to the right (-15 + 13 = -2)
+    }
+
+    notchCenterX.value = withTiming(rawCenter + offset, {
+      duration: 300,
+      easing: Easing.bezier(0.25, 0.46, 0.45, 0.94),
+    });
+    haloX.value = withTiming(activeIndex * tabW + offset, {
+      duration: 300,
+      easing: Easing.bezier(0.25, 0.46, 0.45, 0.94),
+    });
 
     widthSV.value = width;
     tabWsv.value = tabW;
-  }, [activeIndex, routes, width, haloX, notchCenterX, widthSV, tabWsv]);
+  }, [activeIndex, routes, width, notchCenterX, haloX, widthSV, tabWsv]);
 
   useDerivedValue(() => {
     "worklet";
     const _ = activeIndexSV.value;
-    haloLiftY.value = withTiming(HALO_LIFT_Y, { duration: 300, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) });
-    notchDepthSV.value = withTiming(NOTCH_DEPTH, { duration: 300, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) });
+    haloLiftY.value = withTiming(HALO_LIFT_Y, {
+      duration: 300,
+      easing: Easing.bezier(0.25, 0.46, 0.45, 0.94),
+    });
+    notchDepthSV.value = withTiming(NOTCH_DEPTH, {
+      duration: 300,
+      easing: Easing.bezier(0.25, 0.46, 0.45, 0.94),
+    });
   });
 
   const animatedPath = useAnimatedProps(() => {
     "worklet";
     function buildPath(W: number, H: number, cx: number, notchW: number, notchD: number, radius: number): string {
       "worklet";
-      const left = 0, right = W, top = 0, bottom = H;
+      const left = 0,
+        right = W,
+        top = 0,
+        bottom = H;
       const nHalf = notchW / 2;
-      const nStart = Math.max(radius, cx - nHalf);
-      const nEnd = Math.min(W - radius, cx + nHalf);
+      const nStart = cx - nHalf;
+      const nEnd = cx + nHalf;
       const k = 0.551915024494;
 
       const brx = right - radius;
@@ -124,10 +150,9 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
     }
 
     const W = widthSV.value;
-    const tabW = tabWsv.value;
-    const notchW = ICON_BG + 20; // Wider notch to match the image
+    const notchW = NOTCH_WIDTH;
     const notchD = notchDepthSV.value;
-    const r = 16;
+    const r = RADIUS;
     const cx = notchCenterX.value;
 
     return { d: buildPath(W, BAR_HEIGHT, cx, notchW, notchD, r) };
@@ -143,25 +168,33 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
     };
   });
 
-  const iconOpacityStyle = (index: number) =>
-    useAnimatedStyle(() => {
-      "worklet";
-      const isActive = activeIndexSV.value === index;
-      return { opacity: withTiming(isActive ? 0 : 1, { duration: 140 }) };
-    }, []);
-
   const handlePress = useCallback(
     (routeName: string, routeKey: string, isFocused: boolean, index: number) => {
       if (activeIndex === index) {
-        haloLiftY.value = withTiming(HALO_PRESS_LIFT_Y, { duration: 110, easing: Easing.out(Easing.cubic) }, () => {
-          haloLiftY.value = withTiming(HALO_LIFT_Y, { duration: 160, easing: Easing.out(Easing.cubic) });
-        });
-        notchDepthSV.value = withTiming(NOTCH_PRESS_DEPTH, { duration: 110 }, () => {
-          notchDepthSV.value = withTiming(NOTCH_DEPTH, { duration: 160 });
-        });
+        haloLiftY.value = withTiming(
+          HALO_PRESS_LIFT_Y,
+          { duration: 110, easing: Easing.out(Easing.cubic) },
+          () => {
+            haloLiftY.value = withTiming(HALO_LIFT_Y, {
+              duration: 160,
+              easing: Easing.out(Easing.cubic),
+            });
+          }
+        );
+        notchDepthSV.value = withTiming(
+          NOTCH_PRESS_DEPTH,
+          { duration: 110 },
+          () => {
+            notchDepthSV.value = withTiming(NOTCH_DEPTH, { duration: 160 });
+          }
+        );
       }
 
-      const event = navigation.emit({ type: "tabPress", target: routeKey, canPreventDefault: true });
+      const event = navigation.emit({
+        type: "tabPress",
+        target: routeKey,
+        canPreventDefault: true,
+      });
       if (!isFocused && !event.defaultPrevented) {
         navigation.navigate(routeName as never);
       }
@@ -174,6 +207,8 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
     switch (activeRoute?.name) {
       case "home":
         return Icons.House;
+      case "activity":
+        return Icons.ListBullets;
       case "messages":
         return Icons.ChatCircleDots;
       case "profile":
@@ -230,6 +265,9 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
               case "home":
                 IconComp = Icons.HouseSimple;
                 break;
+              case "activity":
+                IconComp = Icons.List;
+                break;
               case "messages":
                 IconComp = Icons.ChatCircle;
                 break;
@@ -252,9 +290,9 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
                 testID={options.tabBarTestID}
               >
                 <View style={styles.tabInner}>
-                  <Animated.View style={iconOpacityStyle(index)}>
+                  <View style={{ opacity: isFocused ? 0 : 1 }}>
                     <IconComp size={24} color={INACTIVE_TEXT} />
-                  </Animated.View>
+                  </View>
                   <Text style={[styles.label, isFocused && styles.labelActive]}>
                     {label}
                   </Text>
@@ -269,21 +307,9 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
 }
 
 const styles = StyleSheet.create({
-  bar: {
-    width: "100%",
-    overflow: "visible",
-    justifyContent: "center",
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-around", // evenly spaced, center aligned
-  },
-  tab: {
-    height: BAR_HEIGHT,
-    alignItems: "center", // center each tab’s content
-    justifyContent: "center",
-  },
+  bar: { width: "100%", overflow: "visible", justifyContent: "center" },
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-around" },
+  tab: { height: BAR_HEIGHT, alignItems: "center", justifyContent: "center" },
   tabInner: {
     height: 52,
     minWidth: 64,
@@ -292,23 +318,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
-    transform: [{ translateY: -6 }], // lift slightly
+    transform: [{ translateY: -6 }],
   },
-  label: {
-    fontSize: 12,
-    color: INACTIVE_TEXT,
-  },
-  labelActive: {
-    color: ACTIVE_GREEN,
-    fontWeight: "600",
-  },
-  haloContainer: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  label: { fontSize: 12, color: INACTIVE_TEXT },
+  labelActive: { color: ACTIVE_GREEN, fontWeight: "600" },
+  haloContainer: { position: "absolute", left: 0, top: 0, alignItems: "center", justifyContent: "center" },
   halo: {
     width: ICON_BG,
     height: ICON_BG,
