@@ -65,7 +65,7 @@ export default function HomeScreen() {
       <View style={{ width: '100%', alignItems: 'flex-start', paddingHorizontal: 24 }}>
         <Text style={styles.title}>
           <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal' }}>patch</Text>
-          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up</Text>
+          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up.</Text>
         </Text>
       </View>
 

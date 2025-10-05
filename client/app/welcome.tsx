@@ -8,7 +8,7 @@ export default function Welcome() {
 
   // ⏱️ Auto-handoff to Home after 2s
   useEffect(() => {
-    const t = setTimeout(() => router.replace("/home"), 2000);
+    const t = setTimeout(() => router.replace("/(auth)/login"), 4000);
     return () => clearTimeout(t);
   }, []);
 
@@ -17,7 +17,7 @@ export default function Welcome() {
       {/* Brand */}
       <Text style={styles.brand}>
         <Text style={styles.brandGreen}>patch</Text>
-        <Text style={styles.brandWhite}> up</Text>
+        <Text style={styles.brandWhite}> up.</Text>
       </Text>
 
       {/* Tagline pinned to safe bottom */}
@@ -39,7 +39,7 @@ const styles = StyleSheet.create({
   brand: {
     fontSize: 44,
     textAlign: "center",
-    fontFamily: "Candal",     // ✅ Candal for "patch up"
+    fontFamily: "Candal",
   },
   brandGreen: { color: "#6EFF87", fontFamily: "Candal" },
   brandWhite: { color: "#FFFFFF", fontFamily: "Candal" },

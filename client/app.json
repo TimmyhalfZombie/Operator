@@ -48,7 +48,9 @@
     },
 
     "androidNavigationBar": {
-      "visible": "immersive" 
+      "visible": "immersive",
+      "backgroundColor": "#000000",
+      "barStyle": "dark-content"
     },
 
     "web": {
