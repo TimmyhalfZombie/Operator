@@ -1,5 +1,5 @@
 import React from "react";
-import { SafeAreaView, View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar } from "react-native";
+import { SafeAreaView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 type Props = {
   onCreate: () => void;
