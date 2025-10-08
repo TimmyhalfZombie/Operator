@@ -34,5 +34,3 @@ export function useMessages() {
 
   return { data, loading, error };
 }
-
-

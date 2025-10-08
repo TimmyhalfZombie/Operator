@@ -8,15 +8,15 @@
     "scheme": "operator",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
-    "assetBundlePatterns": ["assets/**/*"],
+    "assetBundlePatterns": [
+      "assets/**/*"
+    ],
     "sdkVersion": "53.0.0",
-
     "splash": {
       "image": "./assets/images/icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
-
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -24,7 +24,6 @@
         "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to communicate with your vulcanizer device."
       }
     },
-
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
@@ -44,21 +43,17 @@
         "resizeMode": "contain",
         "backgroundColor": "#000000"
       }
-
     },
-
     "androidNavigationBar": {
       "visible": "immersive",
       "backgroundColor": "#000000",
       "barStyle": "dark-content"
     },
-
     "web": {
       "bundler": "metro",
       "output": "static",
       "favicon": "./assets/images/icon.png"
     },
-
     "plugins": [
       "expo-router",
       [
@@ -69,17 +64,27 @@
             "targetSdkVersion": 34,
             "minSdkVersion": 24,
             "packagingOptions": {
-              "pickFirst": ["META-INF/AL2.0", "META-INF/LGPL2.1"],
-              "exclude": ["META-INF/LICENSE*", "META-INF/NOTICE*"]
+              "pickFirst": [
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1"
+              ],
+              "exclude": [
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*"
+              ]
             }
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
-
     "extra": {
       "router": {},
-      "eas": { "projectId": "2e5e73da-40e1-4d42-8c93-5e112a1291a3" }
-    }
+      "API_URL": "http://192.168.1.27:3000",
+      "eas": {
+        "projectId": "7c38d5e4-763b-4d6c-b934-6ae6cd0a86f5"
+      }
+    },
+    "owner": "timmy1111"
   }
 }
