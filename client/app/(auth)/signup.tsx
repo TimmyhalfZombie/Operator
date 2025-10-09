@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
 import { router } from 'expo-router';
+import React, { useState } from 'react';
 import SignupView from '../../src/auth/views/Signup';
 import { registerUser } from '../../src/auth/views/functions/auth';
 

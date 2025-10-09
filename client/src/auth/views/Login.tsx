@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import * as Icons from 'phosphor-react-native';
 
 type Values = { identifier: string; password: string; remember: boolean };
 type Props = {
@@ -19,13 +20,15 @@ const TEXT = '#ffffffff';
 const MUTED = '#9CA3AF';
 
 export default function LoginView({ values, onChange, onSignIn, onSignUp, onForgot, error, loading }: Props) {
+  const [showPassword, setShowPassword] = useState(false);
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
         <Text style={styles.brandRow}>
           <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal' }}>patch</Text>
-          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up</Text>
+          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up.</Text>
         </Text>
         <Text style={styles.subTitle}>Welcome Back!</Text>
       </View>
@@ -45,15 +48,30 @@ export default function LoginView({ values, onChange, onSignIn, onSignUp, onForg
         />
 
         <Text style={[styles.label, { marginTop: 16 }]}>Password</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor="#6B7280"
-          secureTextEntry
-          keyboardAppearance="dark"
-          value={values.password}
-          onChangeText={(t) => onChange('password', t)}
-        />
+        <View style={styles.inputWrap}>
+          <TextInput
+            style={[styles.input, { paddingRight: 44 }]} // leave room for the eye
+            placeholder="Password"
+            placeholderTextColor="#6B7280"
+            secureTextEntry={!showPassword}
+            keyboardAppearance="dark"
+            value={values.password}
+            onChangeText={(t) => onChange('password', t)}
+          />
+          <Pressable
+            style={styles.eyeBtn}
+            onPress={() => setShowPassword((s) => !s)}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+            hitSlop={12}
+          >
+            {showPassword ? (
+              <Icons.Eye size={20} color={MUTED} />
+            ) : (
+              <Icons.EyeSlash size={20} color={MUTED} />
+            )}
+          </Pressable>
+        </View>
 
         <View style={styles.rowBetween}>
           <Pressable style={styles.rememberWrap} onPress={() => onChange('remember', !values.remember)}>
@@ -91,6 +109,8 @@ const styles = StyleSheet.create({
   form: { marginTop: 28 },
   errorText: { color: '#ff4d4f', marginBottom: 10, fontSize: 14, fontWeight: '600' },
   label: { color: TEXT, fontSize: 15, marginBottom: 6 },
+
+  inputWrap: { position: 'relative' },
   input: {
     height: 48,
     borderRadius: 10,
@@ -100,6 +120,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     color: TEXT,
   },
+  eyeBtn: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+
   rowBetween: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   rememberWrap: { flexDirection: 'row', alignItems: 'center' },
   checkbox: {

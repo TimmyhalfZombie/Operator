@@ -1,16 +1,24 @@
-import * as dotenv from 'dotenv';
-import { ExpoConfig } from 'expo/config';
-import * as path from 'path';
+const path = require('path');
+const dotenv = require('dotenv');
 
-// adjust path if your server folder is elsewhere
 dotenv.config({ path: path.resolve(__dirname, '../server/.env') });
 
-const config: ExpoConfig = {
-  name: 'YourApp',
-  slug: 'your-app',
+module.exports = ({ config }) => ({
+  ...config,
+  name: 'Operator',
+  slug: 'operator',
+
+  scheme: 'operator',
+
+  plugins: [
+    'expo-router',
+    'expo-secure-store'
+  ],
+
   extra: {
     API_URL: process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.27:3000',
   },
-};
 
-export default config;
+  ios: { bundleIdentifier: 'com.yourco.operator' },
+  android: { package: 'com.yourco.operator' },
+});

@@ -1,23 +1,12 @@
-import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 import { config } from '../config';
 
-type JwtUser = { id: string; email: string };
-
-const ACCESS_EXPIRES = '15m';
-const REFRESH_EXPIRES = '7d';
-
-export function signAccess(payload: JwtUser) {
-  return jwt.sign(payload, config.jwtSecret, { expiresIn: ACCESS_EXPIRES });
-}
-
-export function signRefresh(payload: JwtUser) {
-  return jwt.sign(payload, config.jwtSecret, { expiresIn: REFRESH_EXPIRES });
-}
+export type JwtUser = { id: string; email: string };
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const h = req.header('Authorization') || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : undefined;
   if (!token) return res.status(401).json({ message: 'Missing token' });
 
   try {

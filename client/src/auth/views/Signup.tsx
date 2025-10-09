@@ -1,5 +1,6 @@
-import React from 'react';
-import { SafeAreaView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import React, { useState } from 'react';
+import { SafeAreaView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Pressable } from 'react-native';
+import * as Icons from 'phosphor-react-native';
 
 type Values = { username: string; email: string; phone: string; password: string };
 type Props = {
@@ -7,11 +8,13 @@ type Props = {
   onChange: (field: keyof Values, value: string) => void;
   onCreate: () => void;
   onGoToSignIn: () => void;
-  error?: string;       // e.g. "Please sign in"
+  error?: string;
   loading?: boolean;
 };
 
 export default function SignupView({ values, onChange, onCreate, onGoToSignIn, error, loading }: Props) {
+  const [showPassword, setShowPassword] = useState(false);
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -60,15 +63,26 @@ export default function SignupView({ values, onChange, onCreate, onGoToSignIn, e
         />
 
         <Text style={[styles.label, { marginTop: 16 }]}>New Password</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="New Password"
-          placeholderTextColor="#6B7280"
-          secureTextEntry
-          keyboardAppearance="dark"
-          value={values.password}
-          onChangeText={(t) => onChange('password', t)}
-        />
+        <View style={styles.inputWrap}>
+          <TextInput
+            style={[styles.input, { paddingRight: 44 }]} // space for the eye
+            placeholder="New Password"
+            placeholderTextColor="#6B7280"
+            secureTextEntry={!showPassword}
+            keyboardAppearance="dark"
+            value={values.password}
+            onChangeText={(t) => onChange('password', t)}
+          />
+          <Pressable
+            style={styles.eyeBtn}
+            onPress={() => setShowPassword((s) => !s)}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+            hitSlop={12}
+          >
+            {showPassword ? <Icons.Eye size={20} color={MUTED} /> : <Icons.EyeSlash size={20} color={MUTED} />}
+          </Pressable>
+        </View>
 
         <TouchableOpacity style={styles.primaryBtn} onPress={onCreate} activeOpacity={0.85} disabled={loading}>
           {loading ? <ActivityIndicator /> : <Text style={styles.primaryText}>Create</Text>}
@@ -101,6 +115,8 @@ const styles = StyleSheet.create({
   form: { marginTop: 28 },
   errorText: { color: '#ff4d4f', marginBottom: 10, fontSize: 14, fontWeight: '600' },
   label: { color: TEXT, fontSize: 15, marginBottom: 6 },
+
+  inputWrap: { position: 'relative' },
   input: {
     height: 48,
     borderRadius: 10,
@@ -110,6 +126,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     color: TEXT,
   },
+  eyeBtn: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+
   primaryBtn: { marginTop: 18, backgroundColor: GREEN, height: 48, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   primaryText: { color: '#0A0A0A', fontSize: 16, fontWeight: '700' },
   footerRow: { marginTop: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
