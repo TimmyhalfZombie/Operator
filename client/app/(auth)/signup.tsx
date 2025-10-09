@@ -11,19 +11,31 @@ export default function SignupScreen() {
   async function onCreate() {
     setError('');
     const { username, email, phone, password } = values;
-    if (!username.trim() || !email.trim() || !phone.trim() || !password.trim()) {
-      setError('Fill all fields');
+
+    // Require only username, phone, and password. Email is optional.
+    if (!username.trim() || !phone.trim() || !password.trim()) {
+      setError('Please fill username, phone, and password.');
       return;
     }
+
     setLoading(true);
     try {
-      await registerUser({
+      const payload = {
         username: username.trim(),
-        email: email.trim(),
         phone: phone.trim(),
-        password,
+        password, // already validated in SignupView
+        ...(email.trim() ? { email: email.trim() } : {}), // include only if provided
+      };
+
+      await registerUser(payload as {
+        username: string;
+        phone: string;
+        password: string;
+        email?: string;
       });
-      router.replace('/(tabs)/home');
+
+      // after first create-account, show the loading screen
+      router.replace('/(auth)/patching-up');
     } catch (e: any) {
       setError(e?.message || 'Sign up failed');
       console.log('signup error:', e);

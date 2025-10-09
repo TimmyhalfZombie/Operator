@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { ObjectId } from 'mongodb';
 import { connectDB } from '../db/connect';
-import { signAccess, signRefresh, requireAuth } from '../middleware/jwt';
+import { requireAuth, signAccess, signRefresh } from '../middleware/jwt';
 
 const router = Router();
 
@@ -32,7 +32,7 @@ router.post('/register', async (req, res, next) => {
     const phoneNorm = normalizePhone(phone);
     password = String(password || '');
 
-    if (!username || !email || !password) {
+    if (!username || !password) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
@@ -40,7 +40,10 @@ router.post('/register', async (req, res, next) => {
     const users = db.collection('users');
 
     const conflict = await users.findOne({
-      $or: [{ email }, ...(phoneNorm ? [{ phone: phoneNorm }] : [])],
+      $or: [
+        ...(email ? [{ email }] : []),
+        ...(phoneNorm ? [{ phone: phoneNorm }] : []),
+      ],
     });
     if (conflict) {
       return res.status(409).json({ message: 'Email or phone already in use' });
@@ -49,7 +52,7 @@ router.post('/register', async (req, res, next) => {
     const hash = await bcrypt.hash(password, 10);
     const doc = await users.insertOne({
       username,
-      email,
+      ...(email ? { email } : {}),
       ...(phoneNorm ? { phone: phoneNorm } : {}),
       // match your collection’s convention from the screenshot
       password_hash: hash,

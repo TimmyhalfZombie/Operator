@@ -5,17 +5,27 @@ export default function AuthLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        // try one of: 'fade', 'slide_from_right', 'slide_from_left', 'fade_from_bottom'
         animation: "slide_from_right",
         gestureEnabled: true,
         fullScreenGestureEnabled: true,
-        contentStyle: { backgroundColor: "#0B0B0B" }, // match your dark bg to avoid flashes
+        contentStyle: { backgroundColor: "#0B0B0B" }, // avoid white flashes on dark theme
       }}
     >
-      {/* (optional) per-screen overrides */}
+      {/* Auth screens */}
       <Stack.Screen name="login" options={{ animation: "fade" }} />
       <Stack.Screen name="signup" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="forgotpassword" options={{ animation: "slide_from_right" }} />
+
+      {/* Loading screen shown after first create-account */}
+      <Stack.Screen
+        name="patching-up"
+        options={{
+          headerShown: false,
+          animation: "fade", // quick in/out, feels like a splash
+          // If you ever want to block swipe-back here, uncomment:
+          // gestureEnabled: false,
+        }}
+      />
     </Stack>
   );
 }

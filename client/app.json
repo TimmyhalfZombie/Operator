@@ -80,7 +80,7 @@
     ],
     "extra": {
       "router": {},
-      "API_URL": "http://192.168.1.27:3000",
+      "API_URL": "",
       "eas": {
         "projectId": "7c38d5e4-763b-4d6c-b934-6ae6cd0a86f5"
       }

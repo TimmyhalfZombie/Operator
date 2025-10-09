@@ -1,4 +1,4 @@
-import { MongoClient, Db, MongoServerError, IndexDescription } from 'mongodb';
+import { Db, IndexDescription, MongoClient, MongoServerError } from 'mongodb';
 import { config } from '../config';
 
 if (!config.mongoUri) throw new Error('MONGODB_URI is missing');
@@ -119,8 +119,14 @@ async function safeEnsureIndex(
 }
 
 async function ensureIndexes(d: Db) {
-  // email: must be unique; let Mongo reuse existing name (e.g., email_1)
-  await safeEnsureIndex(d, 'users', { email: 1 }, { unique: true });
+  // email: unique only when present & a string
+  await safeEnsureIndex(d, 'users', { email: 1 }, {
+    unique: true,
+    name: 'email_unique_when_present',
+    partialFilterExpression: {
+      email: { $exists: true, $type: 'string' },
+    },
+  });
 
   // phone: unique only when present & a string.
   // NOTE: No `$ne: ""` (older Mongo rejects `$not/$ne` in partial indexes).

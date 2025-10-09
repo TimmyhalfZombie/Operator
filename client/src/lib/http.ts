@@ -1,5 +1,5 @@
-import { API_URL } from './env';
 import { tokens } from '../auth/tokenStore';
+import { resolveApiBaseUrl } from './serverDiscovery';
 
 type FetchOptions = Omit<RequestInit, 'body' | 'headers'> & {
   body?: any;
@@ -9,7 +9,8 @@ type FetchOptions = Omit<RequestInit, 'body' | 'headers'> & {
 
 export async function api(path: string, opts: FetchOptions = {}) {
   const p = path.startsWith('/') ? path : `/${path}`;
-  const url = `${API_URL}${p}`;
+  const base = await resolveApiBaseUrl();
+  const url = `${base}${p}`;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
