@@ -1,9 +1,6 @@
 import { Db, IndexDescription, MongoClient, MongoServerError } from 'mongodb';
 import { config } from '../config';
 
-if (!config.mongoUri) throw new Error('MONGODB_URI is missing');
-if (!config.dbName) throw new Error('DB name is missing');
-
 const client = new MongoClient(config.mongoUri, {
   appName: config.appName,
   maxPoolSize: 20,
@@ -12,57 +9,49 @@ const client = new MongoClient(config.mongoUri, {
   retryWrites: false,
 });
 
-let db: Db | undefined;
-let connectOnce: Promise<Db> | null = null;
 let dbReady = false;
+const dbMap: Record<string, Db> = {};
+let connectOnce: Promise<Db> | null = null;
 
-export function isDbReady() {
-  return dbReady;
+export function getAuthDb(): Db {
+  const d = dbMap[config.authDbName];
+  if (!d) throw new Error('Auth DB not ready; call connectDB() first');
+  return d;
+}
+export function getCustomerDb(): Db {
+  const d = dbMap[config.customerDbName];
+  if (!d) throw new Error('Customer DB not ready; call connectDB() first');
+  return d;
 }
 
 export async function connectDB(): Promise<Db> {
-  if (db) return db;
+  if (dbReady) return getAuthDb();
   if (connectOnce) return connectOnce;
 
   connectOnce = (async () => {
     await client.connect();
-    const d = client.db(config.dbName);
 
-    // --- Ensure indexes safely ---
-    await ensureIndexes(d);
+    const authDb = client.db(config.authDbName);
+    const customerDb = client.db(config.customerDbName);
 
-    // confirm connectivity
-    await d.command({ ping: 1 });
+    await ensureAuthIndexes(authDb);
+    await ensureCustomerIndexes(customerDb);
 
+    await authDb.command({ ping: 1 });
+    await customerDb.command({ ping: 1 });
+
+    dbMap[config.authDbName] = authDb;
+    dbMap[config.customerDbName] = customerDb;
     dbReady = true;
-    db = d;
-    console.log(`✅ DB connected & ready → ${config.dbName}`);
-    return d;
+
+    console.log(`✅ Connected DBs → auth="${config.authDbName}"  customer="${config.customerDbName}"`);
+    return authDb;
   })();
 
-  try {
-    return await connectOnce;
-  } catch (err) {
-    connectOnce = null; // allow retry on next call
-    throw err;
-  }
+  return connectOnce;
 }
 
-export async function ping(): Promise<boolean> {
-  try {
-    const d = await connectDB();
-    const res = await d.command({ ping: 1 });
-    return res.ok === 1;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Create/align an index without crashing on:
- * - 11000 (duplicate key while building unique) → make error actionable
- * - 85 (IndexOptionsConflict) → reuse existing name or reconcile
- */
+/* ---------- indexes ---------- */
 async function safeEnsureIndex(
   d: Db,
   collection: string,
@@ -70,84 +59,37 @@ async function safeEnsureIndex(
   options: Omit<IndexDescription, 'key'> & { name?: string } = {}
 ) {
   const coll = d.collection(collection);
-
   try {
     await coll.createIndex(keys, options);
-    return;
   } catch (e: any) {
     const err = e as MongoServerError;
-
-    // Duplicate data while building unique index
-    if (err.code === 11000) {
-      const requestedName = options?.name || `${JSON.stringify(keys)}`;
-      err.message =
-        `E11000 duplicate key while creating unique index "${requestedName}" on "${collection}". ` +
-        `There are existing documents violating the unique constraint. Clean duplicates, then retry.`;
-      throw err;
-    }
-
-    // Index exists with a different name/options
     if (err.code === 85) {
-      const existing = (await coll.indexes()).find(
-        (idx) => JSON.stringify(idx.key) === JSON.stringify(keys)
-      );
-      if (!existing) throw err;
-
-      const desiredUnique = !!(options as any)?.unique;
-      const existingUnique = !!existing.unique;
-
-      if (desiredUnique === existingUnique) {
-        // Reattempt with the existing name to avoid conflict
+      const existing = (await coll.indexes()).find((i) => JSON.stringify(i.key) === JSON.stringify(keys));
+      if (existing) {
         await coll.createIndex(keys, { ...options, name: existing.name });
         return;
       }
-
-      // Changing uniqueness → must drop & recreate (ensure no duplicates first!)
-      console.warn(
-        `⚠️ Changing uniqueness for index on ${collection} ${JSON.stringify(
-          keys
-        )} from ${existingUnique} → ${desiredUnique}. Dropping "${existing.name}" and recreating.`
-      );
-      await coll.dropIndex(existing.name);
-      await coll.createIndex(keys, options);
-      return;
     }
-
-    // Some older Mongo versions can throw code 67 (CannotCreateIndex) for unsupported partial expressions.
     throw err;
   }
 }
 
-async function ensureIndexes(d: Db) {
-  // email: unique only when present & a string
+async function ensureAuthIndexes(d: Db) {
   await safeEnsureIndex(d, 'users', { email: 1 }, {
     unique: true,
     name: 'email_unique_when_present',
-    partialFilterExpression: {
-      email: { $exists: true, $type: 'string' },
-    },
+    partialFilterExpression: { email: { $exists: true, $type: 'string' } },
   });
-
-  // phone: unique only when present & a string.
-  // NOTE: No `$ne: ""` (older Mongo rejects `$not/$ne` in partial indexes).
   await safeEnsureIndex(d, 'users', { phone: 1 }, {
     unique: true,
     name: 'phone_unique_when_present',
-    partialFilterExpression: {
-      phone: { $exists: true, $type: 'string' },
-    },
+    partialFilterExpression: { phone: { $exists: true, $type: 'string' } },
   });
-
-  // username: non-unique (plain index)
-  await safeEnsureIndex(d, 'users', { username: 1 }, { unique: false, name: 'username_idx' });
+  await safeEnsureIndex(d, 'users', { username: 1 }, { name: 'username_idx' });
 }
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  try {
-    await client.close();
-    console.log('🛑 Mongo client closed');
-  } finally {
-    process.exit(0);
-  }
-});
+async function ensureCustomerIndexes(d: Db) {
+  await safeEnsureIndex(d, 'assistrequests', { userId: 1 }, { name: 'userId_idx' });
+  await safeEnsureIndex(d, 'assistrequests', { status: 1 }, { name: 'status_idx' });
+  await safeEnsureIndex(d, 'assistrequests', { createdAt: -1 }, { name: 'createdAt_idx' });
+}

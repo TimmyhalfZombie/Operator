@@ -1,10 +1,11 @@
+// src/lib/http.ts
 import { tokens } from '../auth/tokenStore';
 import { resolveApiBaseUrl } from './serverDiscovery';
 
 type FetchOptions = Omit<RequestInit, 'body' | 'headers'> & {
   body?: any;
   headers?: Record<string, string>;
-  auth?: boolean;
+  auth?: boolean; // when true we’ll attach Bearer token
 };
 
 export async function api(path: string, opts: FetchOptions = {}) {
@@ -17,7 +18,9 @@ export async function api(path: string, opts: FetchOptions = {}) {
     ...(opts.headers || {}),
   };
 
+  // ⬇️ Ensure tokens are loaded, then attach Authorization
   if (opts.auth) {
+    await tokens.waitUntilReady?.();        // no-op if already ready
     const t = tokens.getAccess();
     if (t) headers.Authorization = `Bearer ${t}`;
   }

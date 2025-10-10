@@ -1,9 +1,10 @@
+// AuthGate.tsx
 import React, { useEffect, useState } from 'react';
-import { View, Text } from 'react-native';
+import { Text, View } from 'react-native';
+import { tokens } from '../auth/tokenStore';
+import { fetchMe, loginWithIdentifier, registerUser } from '../lib/api';
 import LoginView from './views/Login';
 import SignupView from './views/Signup';
-import { fetchMe, loginWithIdentifier, registerUser } from './views/functions/auth';
-import { loadToken } from './views/functions/api';
 
 type Mode = 'login' | 'signup';
 
@@ -20,7 +21,8 @@ export default function AuthGate() {
   // Try to restore session on mount
   useEffect(() => {
     (async () => {
-      const t = await loadToken();
+      await tokens.waitUntilReady(); // in case _layout didn’t run/finish yet
+      const t = tokens.getAccess();
       if (!t) return;
       try {
         await fetchMe();
@@ -39,7 +41,14 @@ export default function AuthGate() {
     }
     setLoading(true);
     try {
-      await loginWithIdentifier({ identifier: loginVals.identifier.trim(), password: loginVals.password });
+      // The login function already handles token persistence
+      await loginWithIdentifier({
+        identifier: loginVals.identifier.trim(),
+        password: loginVals.password,
+      });
+
+      // Validate session
+      await fetchMe();
       setAuthed(true);
     } catch {
       setError('Please sign in');
@@ -58,12 +67,15 @@ export default function AuthGate() {
     }
     setLoading(true);
     try {
+      // The register function already handles token persistence
       await registerUser({
         username: username.trim(),
         email: email.trim(),
         phone: phone.trim(),
         password,
       });
+
+      await fetchMe();
       setAuthed(true); // registered users are immediately signed in (token returned)
     } catch {
       setError('Please sign in');
@@ -74,11 +86,11 @@ export default function AuthGate() {
   };
 
   if (authed) {
-    // ⬇️ Replace this with your real Home screen/navigation
+    // ⬇️ Replace with your real Home/navigation
     return (
       <View style={{ flex: 1, backgroundColor: '#0B0B0B', alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ color: '#44ff75', fontSize: 18, fontWeight: '700' }}>
-          You’re signed in. Replace <AuthGate /> return with your Home screen.
+          You’re signed in. Replace &lt;AuthGate /&gt; return with your Home screen.
         </Text>
       </View>
     );

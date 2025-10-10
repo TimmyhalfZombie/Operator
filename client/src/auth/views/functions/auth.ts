@@ -1,19 +1,37 @@
-// client/src/auth/views/functions/auth.ts
+// src/auth/views/functions/auth.ts
 import { api } from '../../../lib/http';
+import { tokens } from '../../../auth/tokenStore';
 
-type LoginArgs = { identifier: string; password: string };
-type RegisterArgs = { username: string; email: string; phone: string; password: string };
-type ResetArgs = { identifier: string; newPassword: string };
+type LoginReq = { identifier: string; password: string };
+type RegisterReq = { username: string; email: string; phone: string; password: string };
 
-export function loginWithIdentifier({ identifier, password }: LoginArgs) {
-  return api('/api/auth/login', { method: 'POST', body: { identifier, password } });
+type AuthResp = {
+  user: { id: string; email?: string; username?: string; phone?: string };
+  accessToken: string;
+  refreshToken: string;
+};
+
+export async function loginWithIdentifier(body: LoginReq): Promise<AuthResp> {
+  const res = await api('/api/auth/login', { method: 'POST', body });
+  const { accessToken, refreshToken } = res as AuthResp;
+  tokens.set(accessToken, refreshToken);
+  await tokens.saveToStorage();        // ⬅️ persist!
+  return res as AuthResp;
 }
 
-export function registerUser({ username, email, phone, password }: RegisterArgs) {
-  // If your server expects different path/field names, change here.
-  return api('/api/auth/register', { method: 'POST', body: { username, email, phone, password } });
+export async function registerUser(body: RegisterReq): Promise<AuthResp> {
+  const res = await api('/api/auth/register', { method: 'POST', body });
+  const { accessToken, refreshToken } = res as AuthResp;
+  tokens.set(accessToken, refreshToken);
+  await tokens.saveToStorage();        // ⬅️ persist!
+  return res as AuthResp;
 }
 
-export function resetPassword({ identifier, newPassword }: ResetArgs) {
-  return api('/api/auth/reset-password', { method: 'POST', body: { identifier, newPassword } });
+export async function fetchMe() {
+  return api('/api/auth/me', { auth: true, method: 'GET' });
+}
+
+export async function logout() {
+  tokens.clear();
+  await tokens.clearStorage();
 }

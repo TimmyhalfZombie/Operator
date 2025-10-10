@@ -1,12 +1,49 @@
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+// src/lib/api.ts
+import { api } from './http';
+import { tokens } from '../auth/tokenStore';
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
+/** Register → returns and saves tokens, returns user */
+export async function registerUser(input: {
+  username: string;
+  email?: string;
+  phone?: string;
+  password: string;
+}) {
+  const res = await api('/api/auth/register', {
+    method: 'POST',
+    body: input,
   });
-  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
-  return (await res.json()) as T;
+
+  // persist tokens for future sessions
+  tokens.set(res.accessToken, res.refreshToken);
+  await tokens.saveToStorage();
+
+  return res.user;
 }
 
+/** Login → returns and saves tokens, returns user */
+export async function loginWithIdentifier(input: {
+  identifier: string;
+  password: string;
+}) {
+  const res = await api('/api/auth/login', {
+    method: 'POST',
+    body: input,
+  });
 
+  tokens.set(res.accessToken, res.refreshToken);
+  await tokens.saveToStorage();
+
+  return res.user;
+}
+
+/** Fetch current user (requires Authorization header) */
+export async function fetchMe() {
+  return api('/api/auth/me', { auth: true });
+}
+
+/** Load tokens from device storage into memory on app start */
+export async function loadToken() {
+  await tokens.loadFromStorage();
+  return tokens.getAccess();
+}
