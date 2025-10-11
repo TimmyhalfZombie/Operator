@@ -128,7 +128,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { 
-    paddingTop: 50, 
+    paddingTop: 25, 
     paddingVertical: 32, 
     alignItems: 'center', 
     backgroundColor: '#101010', 
@@ -137,8 +137,7 @@ const styles = StyleSheet.create({
 
   title: { 
     fontSize: 28, 
-    marginBottom: 14, 
-    marginTop: -4, 
+    marginBottom: 14,
     letterSpacing: 1, 
     flexDirection: 'row' 
   },

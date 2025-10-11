@@ -271,11 +271,11 @@ export default function SignupView({
             {!!(error || localError) && <Text style={styles.errorText}>{localError || error}</Text>}
 
             {/* Username (neutral→green only) */}
-            <Text style={styles.label}>Username</Text>
+            <Text style={styles.label}>Real Name</Text>
             <HighlightInput
               value={values.username}
               onChangeText={(t) => onChange('username', t)}
-              placeholder="Username"
+              placeholder="Real name"
               testValid={values.username ? (usernameValid ? true : false) : null}
               validOnly
             />
