@@ -1,7 +1,6 @@
-// src/auth/tokenStore.ts
 import * as SecureStore from 'expo-secure-store';
 
-const STORAGE_KEY = 'auth_tokens_v2';           // new atomic blob {access, refresh}
+const STORAGE_KEY = 'auth_tokens_v2';           // atomic blob {access, refresh}
 const LEGACY_ACCESS_KEY = 'auth_access_token_v1';
 const LEGACY_REFRESH_KEY = 'auth_refresh_token_v1';
 
@@ -34,7 +33,7 @@ async function ensureLoaded(): Promise<void> {
           refreshToken = normalize(parsed?.refresh);
           return;
         } catch {
-          // fall through to legacy migration
+          // fall back to legacy migration
         }
       }
 
@@ -61,11 +60,9 @@ async function ensureLoaded(): Promise<void> {
   return inFlight;
 }
 
-// Prime the load as soon as the module is imported (best-effort)
-void ensureLoaded();
+void ensureLoaded(); // prime
 
 async function persistCurrent(): Promise<void> {
-  // Atomic write or delete if empty
   if (accessToken || refreshToken) {
     await SecureStore.setItemAsync(
       STORAGE_KEY,
@@ -77,17 +74,13 @@ async function persistCurrent(): Promise<void> {
 }
 
 export const tokens = {
-  // ---- runtime state ----
   async set(a?: string | null, r?: string | null, options?: PersistOpts) {
-    // undefined = leave unchanged; null/'' = clear that token
     if (a !== undefined) accessToken = normalize(a);
     if (r !== undefined) refreshToken = normalize(r);
-    if (options?.persist) {
-      await persistCurrent();
-    }
+    if (options?.persist) await persistCurrent();
   },
-  getAccess() { return accessToken; },           // sync (call waitUntilReady() first in callers)
-  getRefresh() { return refreshToken; },         // sync
+  getAccess() { return accessToken; },
+  getRefresh() { return refreshToken; },
   async getAccessAsync() { await ensureLoaded(); return accessToken; },
   async getRefreshAsync() { await ensureLoaded(); return refreshToken; },
 
@@ -97,7 +90,6 @@ export const tokens = {
     return opts.persist ? SecureStore.deleteItemAsync(STORAGE_KEY) : Promise.resolve();
   },
 
-  // ---- persistence ----
   async loadFromStorage() { await ensureLoaded(); },
   async saveToStorage() { await ensureLoaded(); await persistCurrent(); },
   async clearStorage() {
@@ -108,7 +100,6 @@ export const tokens = {
     refreshToken = null;
   },
 
-  // ---- readiness helpers (back-compat) ----
   waitUntilReady: ensureLoaded,
   isReady() { return ready; },
 };

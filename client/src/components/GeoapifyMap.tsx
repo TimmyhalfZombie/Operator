@@ -1,20 +1,40 @@
-import React from 'react';
-import { View, StyleSheet, Text, ViewStyle, StyleProp } from 'react-native';
+// client/components/GeoapifyMap.tsx
 import MapLibreGL from '@maplibre/maplibre-react-native';
+import React from 'react';
+import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import Constants from 'expo-constants';
 import { GEOAPIFY_KEY } from '../constants/geo';
-import UserPin from './UserPin';
+import UserPin from './ClientPin';
 
 type Props = {
+  /** Client/customer latitude */
   lat?: number | null;
+  /** Client/customer longitude */
   lng?: number | null;
   zoom?: number;
   /** If provided, overrides the container style. */
   style?: StyleProp<ViewStyle>;
 };
 
+type OperatorLocation = { lat: number; lng: number; updated_at?: string };
+
 function isNum(v: any): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
+
+const extra: any =
+  (Constants as any)?.expoConfig?.extra ??
+  (Constants as any)?.manifest?.extra ??
+  {};
+
+const API_ROOT = (
+  (process.env.EXPO_PUBLIC_API_BASE as string) ||
+  (extra?.API_BASE as string) ||
+  ''
+).replace(/\/$/, ''); // no trailing slash
+
+// Final URL used to fetch operator location from server
+const OP_LOC_URL = API_ROOT ? `${API_ROOT}/api/users/me/location` : `/api/users/me/location`;
 
 MapLibreGL.setAccessToken(null);
 
@@ -29,17 +49,95 @@ async function testGeoapifyKey(key: string): Promise<boolean> {
   }
 }
 
+/** Fetch the operator (current user) location from appdb */
+async function fetchOperatorLocation(): Promise<OperatorLocation | null> {
+  try {
+    const res = await fetch(OP_LOC_URL, { method: 'GET', credentials: 'include' as any });
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (!isNum(j?.lat) || !isNum(j?.lng)) return null;
+    return { lat: j.lat, lng: j.lng, updated_at: j.updated_at };
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch a driving route (Geoapify) between two points, returns a GeoJSON FeatureCollection */
+async function fetchDriveRoute(
+  fromLng: number,
+  fromLat: number,
+  toLng: number,
+  toLat: number,
+  apiKey: string
+): Promise<any | null> {
+  if (!apiKey) return null;
+  try {
+    const url =
+      `https://api.geoapify.com/v1/routing?waypoints=${fromLng},${fromLat}|${toLng},${toLat}&mode=drive&apiKey=${apiKey}`;
+    const r = await fetch(url);
+    const j = await r.json();
+    const feat = j?.features?.[0];
+    return feat ? { type: 'FeatureCollection', features: [feat] } : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
-  const ok = isNum(lat) && isNum(lng);
+  const clientOk = isNum(lat) && isNum(lng);
   const [useGeoapify, setUseGeoapify] = React.useState(false);
 
+  // Operator location (from appdb)
+  const [op, setOp] = React.useState<OperatorLocation | null>(null);
+  // Route feature collection between operator and client
+  const [routeFC, setRouteFC] = React.useState<any | null>(null);
+
+  // Decide which raster tiles to use (Geoapify vs OSM fallback)
   React.useEffect(() => {
-    let m = true;
-    testGeoapifyKey(GEOAPIFY_KEY).then((good) => m && setUseGeoapify(good));
-    return () => { m = false; };
+    let alive = true;
+    testGeoapifyKey(GEOAPIFY_KEY).then((good) => alive && setUseGeoapify(good));
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  if (!ok) {
+  // Poll operator location from server every 5 seconds
+  React.useEffect(() => {
+    let alive = true;
+    let t: any;
+
+    async function tick() {
+      const loc = await fetchOperatorLocation();
+      if (alive) setOp(loc ?? null);
+      t = setTimeout(tick, 5000);
+    }
+
+    tick();
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, []);
+
+  // Fetch a route when both operator + client are available
+  React.useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!clientOk || !op) {
+        if (!cancelled) setRouteFC(null);
+        return;
+      }
+      const fc = await fetchDriveRoute(op.lng, op.lat, lng!, lat!, GEOAPIFY_KEY);
+      if (!cancelled) setRouteFC(fc);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientOk, op?.lat, op?.lng, lat, lng]);
+
+  if (!clientOk) {
     return (
       <View style={[styles.wrap, style ?? styles.defaultSize, styles.placeholder]}>
         <Text style={styles.placeholderText}>Location unavailable</Text>
@@ -48,7 +146,7 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
   }
 
   // MapLibre expects [lng, lat]
-  const center: [number, number] = [lng!, lat!];
+  const clientCenter: [number, number] = [lng!, lat!];
 
   // Geoapify raster tiles (no vector style URL so we avoid font/glyph endpoints).
   const geoapifyTiles = [
@@ -59,6 +157,16 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
   const tiles = useGeoapify ? geoapifyTiles : osmTiles;
   const maxZoom = useGeoapify ? 20 : 19;
 
+  // If operator is known, fit both points; otherwise center on client
+  const bounds =
+    op &&
+    ({
+      sw: [Math.min(op.lng, lng!), Math.min(op.lat, lat!)],
+      ne: [Math.max(op.lng, lng!), Math.max(op.lat, lat!)],
+      padding: 60,
+      animationDuration: 800,
+    } as any);
+
   return (
     <View style={[styles.wrap, style ?? styles.defaultSize]}>
       <MapLibreGL.MapView
@@ -67,13 +175,18 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
         logoEnabled={false}
         attributionEnabled={false}
       >
-        <MapLibreGL.Camera
-          centerCoordinate={center}
-          zoomLevel={zoom}
-          animationMode="flyTo"
-          animationDuration={400}
-        />
+        {bounds ? (
+          <MapLibreGL.Camera bounds={bounds} />
+        ) : (
+          <MapLibreGL.Camera
+            centerCoordinate={clientCenter}
+            zoomLevel={zoom}
+            animationMode="flyTo"
+            animationDuration={400}
+          />
+        )}
 
+        {/* Base raster tiles */}
         <MapLibreGL.RasterSource
           id="base"
           tileUrlTemplates={tiles}
@@ -84,9 +197,43 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
           <MapLibreGL.RasterLayer id="base-layer" />
         </MapLibreGL.RasterSource>
 
-        <MapLibreGL.MarkerView id="user-pin" coordinate={center} anchor={{ x: 0.5, y: 1.0 }}>
+        {/* Route line on top (if available) */}
+        {routeFC && (
+          <MapLibreGL.ShapeSource id="route" shape={routeFC}>
+            <MapLibreGL.LineLayer
+              id="route-line"
+              style={{
+                lineColor: '#6EFF87',
+                lineWidth: 5,
+                lineCap: 'round',
+                lineJoin: 'round',
+                lineOpacity: 0.95,
+              }}
+            />
+          </MapLibreGL.ShapeSource>
+        )}
+
+        {/* Client pin (red) */}
+        <MapLibreGL.MarkerView
+          id="client-pin"
+          coordinate={clientCenter}
+          anchor={{ x: 0.5, y: 1.0 }}
+        >
           <UserPin />
         </MapLibreGL.MarkerView>
+
+        {/* Operator pin (green) from appdb */}
+        {op && isNum(op.lat) && isNum(op.lng) && (
+          <MapLibreGL.MarkerView
+            id="operator-pin"
+            coordinate={[op.lng, op.lat]}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View style={styles.operatorDotOuter}>
+              <View style={styles.operatorDotInner} />
+            </View>
+          </MapLibreGL.MarkerView>
+        )}
       </MapLibreGL.MapView>
     </View>
   );
@@ -108,4 +255,23 @@ const styles = StyleSheet.create({
   // (Only used when lat/lng are missing)
   placeholder: { alignItems: 'center', justifyContent: 'center' },
   placeholderText: { color: '#aaa' },
+
+  // Operator pin (simple green dot with white ring)
+  operatorDotOuter: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#00c853',
+    borderWidth: 2,
+    borderColor: 'white',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  operatorDotInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'white',
+    opacity: 0.6,
+  },
 });

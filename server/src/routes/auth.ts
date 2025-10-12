@@ -1,18 +1,17 @@
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { ObjectId } from 'mongodb';
-import { connectDB } from '../db/connect';
-import { requireAuth, signAccess, signRefresh } from '../middleware/jwt';
+import { connectDB, getCustomerDb } from '../db/connect';
+import { requireAuth, requireRefresh, signAccess, signRefresh } from '../middleware/jwt';
 
 const router = Router();
 
-// --- Helpers ---
+/* ---------- helpers ---------- */
 function normalizePhone(raw?: string) {
   if (typeof raw !== 'string') return undefined;
   const digits = raw.replace(/\D+/g, '');
   return digits.length ? digits : undefined;
 }
-
 function normalizeIdentifier(raw: string) {
   const id = String(raw || '').trim();
   const looksLikeEmail = id.includes('@');
@@ -22,10 +21,10 @@ function normalizeIdentifier(raw: string) {
   return { email, username, phone };
 }
 
-// ------------------- REGISTER -------------------
+/* ------------------- REGISTER ------------------- */
 router.post('/register', async (req, res, next) => {
   try {
-    let { username, email, phone, password } = req.body || {};
+    let { username, email, phone, password, lat, lng } = req.body || {};
 
     username = String(username || '').trim();
     email = String(email || '').trim().toLowerCase();
@@ -50,14 +49,39 @@ router.post('/register', async (req, res, next) => {
     }
 
     const hash = await bcrypt.hash(password, 10);
+    const createdAt = new Date();
+
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    const hasCoords = Number.isFinite(latNum) && Number.isFinite(lngNum);
+
     const doc = await users.insertOne({
       username,
       ...(email ? { email } : {}),
       ...(phoneNorm ? { phone: phoneNorm } : {}),
-      // match your collection’s convention from the screenshot
+      ...(hasCoords ? { initial_lat: latNum, initial_lng: lngNum, initial_loc_at: createdAt } : {}),
       password_hash: hash,
-      created_at: new Date(),
+      created_at: createdAt,
     });
+
+    // mirror into customer DB for operator location bootstrap
+    if (hasCoords) {
+      const customerDb = getCustomerDb();
+      await customerDb.collection('operators').updateOne(
+        { user_id: String(doc.insertedId) },
+        {
+          $set: {
+            user_id: String(doc.insertedId),
+            last_lat: latNum,
+            last_lng: lngNum,
+            last_seen_at: createdAt,
+            accuracy_m: 50,
+            source: 'device',
+          },
+        },
+        { upsert: true }
+      );
+    }
 
     const payload = { id: String(doc.insertedId), email };
     const accessToken = signAccess(payload);
@@ -69,16 +93,17 @@ router.post('/register', async (req, res, next) => {
       refreshToken,
     });
   } catch (e) {
+    console.error('REGISTER failed:', e);
     next(e);
   }
 });
 
-// -------------------- LOGIN ---------------------
+/* -------------------- LOGIN --------------------- */
 router.post('/login', async (req, res, next) => {
   try {
     let { identifier, password } = req.body || {};
     identifier = String(identifier || '').trim();
-    password   = String(password || '');
+    password = String(password || '');
 
     if (!identifier || !password) {
       return res.status(400).json({ message: 'Missing credentials' });
@@ -89,7 +114,6 @@ router.post('/login', async (req, res, next) => {
     const db = await connectDB();
     const users = db.collection('users');
 
-    // Project BOTH possible hash fields (password_hash or legacy password)
     const user = await users.findOne(
       {
         $or: [
@@ -147,17 +171,19 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
-// --------------------- ME -----------------------
-/**
- * GET /api/auth/me
- * Requires Authorization: Bearer <accessToken>
- * Returns { username, phone, email }
- */
+/* --------------------- REFRESH ------------------ */
+router.post('/refresh', requireRefresh, async (req, res) => {
+  const user = (req as any).user as { id: string };
+  // Optionally rotate refresh (recommended)
+  const accessToken = signAccess(user);
+  const refreshToken = signRefresh(user);
+  return res.json({ accessToken, refreshToken });
+});
+
+/* ----------------------- ME -------------------- */
 router.get('/me', requireAuth, async (req, res, next) => {
   try {
-    const { id } = (req as any).user as { id: string; email: string };
-
-    // guard invalid ObjectId
+    const { id } = (req as any).user as { id: string; email?: string };
     if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid user id' });
 
     const db = await connectDB();
@@ -165,7 +191,7 @@ router.get('/me', requireAuth, async (req, res, next) => {
 
     const doc = await users.findOne(
       { _id: new ObjectId(id) },
-      { projection: { username: 1, phone: 1, email: 1 } }
+      { projection: { username: 1, phone: 1, email: 1, initial_lat: 1, initial_lng: 1 } }
     );
     if (!doc) return res.status(404).json({ message: 'User not found' });
 
@@ -173,6 +199,8 @@ router.get('/me', requireAuth, async (req, res, next) => {
       username: doc.username ?? '',
       phone: doc.phone ?? '',
       email: doc.email ?? '',
+      initial_lat: doc.initial_lat ?? null,
+      initial_lng: doc.initial_lng ?? null,
     });
   } catch (e) {
     next(e);

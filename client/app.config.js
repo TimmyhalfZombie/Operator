@@ -2,18 +2,18 @@
 const path = require('path');
 const dotenv = require('dotenv');
 
-// Load .env from project root
 dotenv.config({ path: path.resolve(__dirname, './.env') });
 
 module.exports = ({ config }) => ({
-  // ----- identity -----
   name: 'Operator',
   slug: 'Operator',
   version: '1.0.0',
-  owner: 'timmy1111',          // from your app.json
+  owner: 'timmy1111',
   scheme: 'operator',
 
-  // ----- UI & assets -----
+  // ✅ Disable web by limiting platforms
+  platforms: ['android', 'ios'],
+
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   newArchEnabled: false,
@@ -25,15 +25,10 @@ module.exports = ({ config }) => ({
     backgroundColor: '#000000',
   },
 
-  // ----- plugins -----
   plugins: [
     'expo-router',
     'expo-secure-store',
-
-    // ✅ MapLibre native renderer (no Google key needed)
     ['@maplibre/maplibre-react-native'],
-
-    // Build properties you were using
     [
       'expo-build-properties',
       {
@@ -50,20 +45,13 @@ module.exports = ({ config }) => ({
     ],
   ],
 
-  // ----- runtime extras (available in-app) -----
   extra: {
-    router: {}, // required by expo-router
+    router: {},
     API_URL: process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.27:3000',
     GEOAPIFY_KEY: process.env.EXPO_PUBLIC_GEOAPIFY_KEY || '',
-
-
-    // Keep your EAS project association (so EAS build works)
-    eas: {
-      projectId: '7c38d5e4-763b-4d6c-b934-6ae6cd0a86f5',
-    },
+    eas: { projectId: '7c38d5e4-763b-4d6c-b934-6ae6cd0a86f5' },
   },
 
-  // ----- iOS -----
   ios: {
     bundleIdentifier: 'com.yourco.operator',
     supportsTablet: true,
@@ -72,10 +60,11 @@ module.exports = ({ config }) => ({
         'This app uses Bluetooth to scan and connect to your vulcanizer device.',
       NSBluetoothPeripheralUsageDescription:
         'This app uses Bluetooth to communicate with your vulcanizer device.',
+      NSLocationWhenInUseUsageDescription:
+        'We use your location one time during signup to set up your account and improve Activity features.',
     },
   },
 
-  // ----- Android -----
   android: {
     package: 'com.shemuuu.operator',
     edgeToEdgeEnabled: true,
@@ -85,6 +74,7 @@ module.exports = ({ config }) => ({
       'android.permission.BLUETOOTH_SCAN',
       'android.permission.BLUETOOTH_CONNECT',
       'android.permission.ACCESS_FINE_LOCATION',
+      'android.permission.ACCESS_COARSE_LOCATION',
     ],
     adaptiveIcon: {
       foregroundImage: './assets/images/icon.png',
@@ -95,7 +85,6 @@ module.exports = ({ config }) => ({
       resizeMode: 'contain',
       backgroundColor: '#000000',
     },
-    // moved from app.json androidNavigationBar
     navigationBar: {
       visible: 'immersive',
       backgroundColor: '#000000',
@@ -103,10 +92,5 @@ module.exports = ({ config }) => ({
     },
   },
 
-  // ----- Web -----
-  web: {
-    bundler: 'metro',
-    output: 'static',
-    favicon: './assets/images/icon.png',
-  },
+  // ❌ Removed the "web" block entirely
 });

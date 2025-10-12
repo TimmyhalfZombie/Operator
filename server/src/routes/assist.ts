@@ -3,7 +3,6 @@ import { ObjectId } from 'mongodb';
 import { requireAuth } from '../middleware/jwt';
 import { getCustomerDb } from '../db/connect';
 
-
 const router = Router();
 
 /* --------------------------------------------------------------------------------
@@ -11,6 +10,7 @@ const router = Router();
  * -------------------------------------------------------------------------------*/
 function pickClientName(d: any): string {
   return (
+    d?.customerName ||
     d?.clientName ||
     d?.location?.contactName ||
     d?.location?.contact?.name ||
@@ -21,7 +21,7 @@ function pickClientName(d: any): string {
 }
 
 function pickPlaceName(d: any): string {
-  return d?.placeName || d?.location?.name || d?.vehicle?.model || 'Location';
+  return d?.placeName || d?.location?.name || d?.vehicle?.model || d?.location?.address || 'Location';
 }
 
 function pickAddress(d: any): string {
@@ -77,7 +77,9 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
   const KEY = process.env.GEOAPIFY_API_KEY;
   if (!KEY || !address.trim()) return null;
 
-  const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(address)}&limit=1&apiKey=${KEY}`;
+  const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(
+    address
+  )}&limit=1&apiKey=${KEY}`;
 
   const r = await fetch(url);
   if (!r.ok) {
@@ -194,7 +196,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
 });
 
 /* ================================================================================
- * /next with geocoding fallback & persistence
+ * /next with geocoding fallback & full details
  * GET /api/assist/next → newest pending request
  * ================================================================================*/
 router.get('/next', requireAuth, async (_req, res, next) => {
@@ -202,10 +204,7 @@ router.get('/next', requireAuth, async (_req, res, next) => {
     const db = getCustomerDb();
     const coll = db.collection('assistrequests');
 
-    const doc = await coll.findOne(
-      { status: 'pending' },
-      { sort: { createdAt: -1 } }
-    );
+    const doc = await coll.findOne({ status: 'pending' }, { sort: { createdAt: -1 } });
 
     if (!doc) return res.json({ ok: true, data: null });
 
@@ -221,8 +220,8 @@ router.get('/next', requireAuth, async (_req, res, next) => {
           { _id: (doc as any)._id },
           {
             $set: {
-              coords: gc,                 // top-level for quick access
-              'location.coords': gc,      // also under location for consistency
+              coords: gc, // top-level for quick access
+              'location.coords': gc,
               updatedAt: new Date(),
             },
           }
@@ -237,7 +236,13 @@ router.get('/next', requireAuth, async (_req, res, next) => {
         clientName: pickClientName(doc),
         placeName: pickPlaceName(doc),
         address: pickAddress(doc),
-        coords: coords || null, // still null if even geocoding failed
+        coords: coords || null,
+
+        // EXTRA FIELDS FOR UI (pulled directly from your DB shape)
+        phone: doc.customerPhone ?? null,
+        vehicleType: doc.vehicle?.model ?? null,
+        plateNumber: doc.vehicle?.plate ?? null,
+        otherInfo: doc.vehicle?.notes ?? null,
       },
     });
   } catch (e) {
@@ -269,7 +274,24 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
     );
 
     if (!result.value) return res.status(404).json({ message: 'Request not found or not pending' });
-    res.json({ ok: true });
+
+    // Optionally return normalized payload (client currently doesn’t use it, but it’s handy)
+    const d = result.value;
+    return res.json({
+      ok: true,
+      data: {
+        id: String(d._id),
+        clientName: pickClientName(d),
+        placeName: pickPlaceName(d),
+        address: pickAddress(d),
+        coords: extractCoords(d) || null,
+        phone: d.customerPhone ?? null,
+        vehicleType: d.vehicle?.model ?? null,
+        plateNumber: d.vehicle?.plate ?? null,
+        otherInfo: d.vehicle?.notes ?? null,
+        status: d.status || 'accepted',
+      },
+    });
   } catch (e) {
     next(e);
   }

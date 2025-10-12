@@ -1,54 +1,77 @@
-import React from 'react';
-import { View, StyleSheet, Animated, Easing, Platform } from 'react-native';
+  import React from 'react';
+  import { View, StyleSheet, Animated, Easing, Platform, PixelRatio } from 'react-native';
 
-const BLUE = '#2FA3FF';
-const SIZE = 18; // circle diameter
+  const BLUE = '#0A84FF';
 
-export default function ClientPin() {
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  type Props = {
+    dotSize?: number;      // inner blue circle diameter
+    ring?: number;         // white ring thickness
+    pulseScale?: number;   // how big the pulse grows
+  };
 
-  React.useEffect(() => {
-    Animated.loop(
-      Animated.timing(pulse, {
-        toValue: 1,
-        duration: 1600,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      })
-    ).start();
-  }, [pulse]);
+  export default function UserPin({ dotSize = 20, ring = 4, pulseScale = 1.8 }: Props) {
+    const OUTER = dotSize + ring * 2;                           // visible dot incl. white ring
+    const BOX   = Math.ceil(PixelRatio.roundToNearestPixel(OUTER * pulseScale)) + 2; // wrapper size (no clipping)
 
-  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.9] });
-  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
+    const pulse = React.useRef(new Animated.Value(0)).current;
+    React.useEffect(() => {
+      Animated.loop(
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1600,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        })
+      ).start();
+    }, [pulse]);
 
-  return (
-    <View pointerEvents="none" style={styles.wrap}>
-      <Animated.View style={[styles.pulse, { transform: [{ scale }], opacity }]} />
-      <View style={styles.dot} />
-    </View>
-  );
-}
+    const scale   = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, pulseScale] });
+    const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.28, 0] });
 
-const styles = StyleSheet.create({
-  wrap: { alignItems: 'center', justifyContent: 'center' },
-  pulse: {
-    position: 'absolute',
-    width: SIZE + 8,
-    height: SIZE + 8,
-    borderRadius: (SIZE + 8) / 2,
-    borderWidth: 2,
-    borderColor: BLUE,
-  },
-  dot: {
-    width: SIZE,
-    height: SIZE,
-    borderRadius: SIZE / 2,
-    backgroundColor: BLUE,
-    borderWidth: 2,
-    borderColor: '#ffffff',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } },
-      android: { elevation: 2 },
-    }),
-  },
-});
+    return (
+      <View
+        pointerEvents="none"
+        style={[styles.wrap, { width: BOX, height: BOX }]}
+        collapsable={false}
+        renderToHardwareTextureAndroid
+        needsOffscreenAlphaCompositing
+      >
+        {/* pulse as a filled disc (no border = no shaving) */}
+        <Animated.View
+          style={[
+            styles.pulse,
+            { width: OUTER, height: OUTER, borderRadius: OUTER / 2, transform: [{ scale }], opacity }
+          ]}
+        />
+
+        {/* white ring via nesting (no borders) */}
+        <View style={[styles.outer, { width: OUTER, height: OUTER, borderRadius: OUTER / 2 }]}>
+          <View style={[styles.inner, { width: dotSize, height: dotSize, borderRadius: dotSize / 2 }]} />
+        </View>
+      </View>
+    );
+  }
+
+  const styles = StyleSheet.create({
+    wrap: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'visible',
+    },
+    pulse: {
+      position: 'absolute',
+      backgroundColor: BLUE,
+    },
+    outer: {
+      backgroundColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+      ...Platform.select({
+        ios: { shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+        android: { elevation: 3 },
+      }),
+    },
+    inner: {
+      backgroundColor: BLUE,
+    },
+  });

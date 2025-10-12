@@ -1,69 +1,60 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, Animated, Easing, StatusBar, StyleSheet } from 'react-native';
+// client/app/(auth)/patching-up.tsx
+import React, { useEffect, useState } from 'react';
+import { SafeAreaView, View, Text, StyleSheet, StatusBar, BackHandler } from 'react-native';
 import { router } from 'expo-router';
 
-const GREEN = '#44ff75';
-
-function Dots() {
-  const a = [useRef(new Animated.Value(0)).current,
-             useRef(new Animated.Value(0)).current,
-             useRef(new Animated.Value(0)).current];
+export default function PatchingUpScreen() {
+  const [dots, setDots] = useState('');
 
   useEffect(() => {
-    const start = (val: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(val, { toValue: 1, duration: 320, easing: Easing.out(Easing.quad), useNativeDriver: true, delay }),
-          Animated.timing(val, { toValue: 0, duration: 320, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-        ])
-      ).start();
+    // cycle ".", "..", "..."
+    const dotTimer = setInterval(() => {
+      setDots((d) => (d.length < 3 ? d + '.' : ''));
+    }, 300);
 
-    const s1 = start(a[0], 0);
-    const s2 = start(a[1], 120);
-    const s3 = start(a[2], 240);
-    return () => { s1?.stop?.(); s2?.stop?.(); s3?.stop?.(); };
-  }, [a]);
+    // block back while we show the loader
+    const onBack = () => true;
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
 
-  return (
-    <>
-      {a.map((val, i) => (
-        <Animated.Text
-          key={i}
-          style={{
-            color: '#fff',
-            fontSize: 22,
-            fontWeight: '700',
-            transform: [{ translateY: val.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) }],
-            opacity: val.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }),
-          }}
-        >
-          .
-        </Animated.Text>
-      ))}
-    </>
-  );
-}
+    // navigate after 3 seconds
+    const navTimer = setTimeout(() => {
+      router.replace('/(tabs)/home');
+    }, 5000);
 
-export default function PatchingUp() {
-  useEffect(() => {
-    const t = setTimeout(() => router.replace('/(tabs)/home'), 3000); // 3s
-    return () => clearTimeout(t);
+    return () => {
+      clearInterval(dotTimer);
+      clearTimeout(navTimer);
+      sub.remove();
+    };
   }, []);
 
   return (
-    <View style={styles.wrap}>
+    <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <View style={styles.row}>
-        <Text style={[styles.text, { color: GREEN }]}>patching</Text>
-        <Text style={[styles.text, { marginHorizontal: 6 }]}>up</Text>
-        <Dots />
+      <View style={styles.center}>
+        <Text style={styles.row}>
+          <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal' }}>patching</Text>
+          <Text style={{ color: '#ffffffff', fontWeight: 'normal', fontFamily: 'Candal' }}>  up{dots}</Text>
+        </Text>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
+const BG = '#0B0B0B';
+const GREEN = '#44ff75';
+const WHITE = '#FFFFFF';
+
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  row: { flexDirection: 'row', alignItems: 'center' },
-  text: { fontSize: 22, fontWeight: '700', color: '#fff' },
+  container: { flex: 1, backgroundColor: BG },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  row: {
+    fontSize: 32,
+    letterSpacing: 0.5,
+    fontWeight: '800',
+    // if you loaded this font already, uncomment:
+    // fontFamily: 'Candal',
+  },
+  green: { color: GREEN /*, fontFamily: 'Candal'*/ },
+  white: { color: WHITE /*, fontFamily: 'Candal'*/ },
 });

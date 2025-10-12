@@ -8,7 +8,8 @@ import { connectDB } from './db/connect';
 import authRoutes from './routes/auth';
 import usersRoutes from './routes/users';
 import assistRoutes from './routes/assist';
-import geoRoutes from './routes/geo';          // ← add: routing & places proxy
+import geoRoutes from './routes/geo';          // routing & places proxy
+import operatorRoutes from './routes/operator'; // NEW: exposes /api/users/me/location
 
 const app = express();
 
@@ -27,9 +28,10 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 /* ---------- routes ---------- */
 app.use('/api/auth', authRoutes);     // → appdb.users
-app.use('/api/users', usersRoutes);   // ← already in your code
+app.use('/api/users', usersRoutes);   // existing user routes
 app.use('/api/assist', assistRoutes); // → customer.assistrequests
-app.use('/api/geo', geoRoutes);       // ← add: /api/geo/route, /api/geo/places
+app.use('/api/geo', geoRoutes);       // /api/geo/route, /api/geo/places
+app.use('/api', operatorRoutes);      // NEW mount → GET /api/users/me/location
 
 /* ---------- 404 ---------- */
 app.use((_req, res) => res.status(404).json({ message: 'Not found' }));

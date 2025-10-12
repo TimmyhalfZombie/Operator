@@ -41,10 +41,7 @@ const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 const isUsername = (v: string) => v.trim().length >= 3;
 const isPhone = (v: string) => v.replace(/\D/g, '').length >= 7;
 
-/* ------------------------ border-only animated input
-   validOnly=true  -> neutral (gray) → green; never red
-   validOnly=false -> neutral → red (invalid) → green (valid)
-*/
+
 function HighlightInput({
   value,
   onChangeText,

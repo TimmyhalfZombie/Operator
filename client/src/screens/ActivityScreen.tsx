@@ -18,6 +18,10 @@ const SUBTEXT = '#9AA09C';
 const DIVIDER = '#1F1F1F';
 const GREEN = '#6EFF87';
 
+// Inter font families (ensure these are loaded in your app)
+const INTER_BLACK = 'Inter-Black';
+const INTER_MEDIUM = 'Inter-Medium';
+
 type ActivityItemProps = {
   title: string;
   subtitle?: string;
@@ -51,7 +55,9 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
         </View>
       </View>
       <View style={styles.itemRight}>
-        {isNew ? <View style={styles.newDot} /> : (
+        {isNew ? (
+          <View style={styles.newDot} />
+        ) : (
           <View style={styles.checkWrap}>
             <Icons.Check size={16} color={GREEN} weight="bold" />
           </View>
@@ -92,9 +98,7 @@ const ActivityScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.headerWrap}>
-        <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal', fontSize: 25 }}>
-          Activity
-        </Text>
+          <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal', fontSize: 25 }}>Activity</Text>
       </View>
 
       <ScrollView
@@ -117,13 +121,13 @@ const ActivityScreen: React.FC = () => {
           </View>
         ) : (
           <>
-            {/* New */}
             {newItems.length > 0 && (
               <>
                 <Text style={styles.sectionTitle}>New</Text>
                 <View style={styles.card}>
                   {newItems.map((it, idx) => {
-                    const title = it?.location?.address || it?.vehicle?.model || 'Assistance request';
+                    const title =
+                      it?.location?.address || it?.vehicle?.model || 'Assistance request';
                     return (
                       <React.Fragment key={it.id}>
                         <ActivityItem
@@ -141,11 +145,11 @@ const ActivityScreen: React.FC = () => {
               </>
             )}
 
-            {/* Recent */}
             <Text style={styles.sectionTitle}>Recent</Text>
             <View style={styles.card}>
               {recentItems.map((it, idx) => {
-                const title = it?.location?.address || it?.vehicle?.model || 'Assistance request';
+                const title =
+                  it?.location?.address || it?.vehicle?.model || 'Assistance request';
                 const showRate = String(it.status).toLowerCase() === 'completed';
 
                 // Client location from Mongo: coordinates = [lng, lat]
@@ -153,7 +157,13 @@ const ActivityScreen: React.FC = () => {
                 const clientLat = it?.location?.coordinates?.[1];
 
                 const clientIdParam =
-                  String(it?.customer?.id || it?.owner?.id || it?.clientId || it?.userId || '') || undefined;
+                  String(
+                    it?.customer?.id ||
+                      it?.owner?.id ||
+                      it?.clientId ||
+                      it?.userId ||
+                      ''
+                  ) || undefined;
 
                 const params: Record<string, string> = {};
                 if (clientIdParam) params.clientId = clientIdParam;
@@ -161,7 +171,7 @@ const ActivityScreen: React.FC = () => {
                   params.clientLat = String(clientLat as number);
                   params.clientLng = String(clientLng as number);
                 }
-                if (it?.id) params.activityId = String(it.id); // optional but handy
+                if (it?.id) params.activityId = String(it.id);
 
                 const onPress = () => router.push({ pathname: '/activity-detail', params });
 
@@ -190,8 +200,14 @@ export default ActivityScreen;
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
   headerWrap: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 6 },
-  header: { fontSize: 30, fontWeight: '800', color: GREEN },
+  headerText: {
+    color: '#44ff75',
+    fontSize: 25,
+    fontFamily: INTER_BLACK,
+  },
+
   scroll: { flex: 1, paddingHorizontal: 14 },
+
   sectionTitle: {
     color: TEXT,
     opacity: 0.9,
@@ -199,9 +215,12 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     marginBottom: 8,
     marginTop: 12,
+    fontFamily: INTER_BLACK,
   },
+
   card: { borderRadius: 16, paddingVertical: 8 },
   sectionSpacer: { height: 8 },
+
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -225,10 +244,34 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(110,255,135,0.08)',
   },
   itemTextWrap: { flex: 1 },
-  badgeNew: { color: GREEN, fontSize: 12, marginBottom: 2 },
-  itemTitle: { color: TEXT, fontSize: 16, fontWeight: '700' },
-  itemSubtitle: { color: SUBTEXT, fontSize: 12, marginTop: 2 },
-  rateText: { marginTop: 6, color: '#CDEEDA', fontSize: 12 },
+
+  badgeNew: { 
+    color: GREEN, 
+    fontSize: 15, 
+    marginBottom: 2,
+     fontFamily: INTER_BLACK 
+    },
+
+  itemTitle: { 
+    color: TEXT, 
+    fontSize: 16, 
+    fontFamily: INTER_BLACK 
+  },
+
+  itemSubtitle: {
+    color: SUBTEXT, 
+    fontSize: 12, 
+    marginTop: 2, 
+    fontFamily: INTER_MEDIUM 
+  },
+
+  rateText: {
+     marginTop: 6, 
+     color: '#CDEEDA', 
+     fontSize: 12, 
+     fontFamily: INTER_BLACK
+     },
+
   itemRight: { width: 28, alignItems: 'flex-end' },
   newDot: { width: 10, height: 10, borderRadius: 6, backgroundColor: GREEN },
   checkWrap: {
@@ -240,6 +283,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   divider: {
     height: 1,
     marginLeft: 54,
