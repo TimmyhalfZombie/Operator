@@ -58,6 +58,9 @@ export default function useAcceptedJobUI(defaultBottomOffset = 12) {
       if (!state.job) return;
       const j = state.job;
 
+      // Close the card immediately to prevent first screen flash
+      close();
+
       // 1) tell the server this request is complete; get details back
       const completed = await completeAssist(j.id);
 
@@ -65,20 +68,11 @@ export default function useAcceptedJobUI(defaultBottomOffset = 12) {
       router.push({
         pathname: '/activity-detail',
         params: {
-          id: completed.id || j.id, // Add id parameter for database lookup
-          customer: completed.clientName || j.clientName,
-          timeRange: completed.completedAt || '', // screen shows it as text
-          status: 'Repaired',
-          startName: completed.startName || 'Start',
-          startAddr: completed.startAddr || '',
-          endName: completed.placeName || j.placeName,  
-          endAddr: completed.address || j.address,
-          rating: String(completed.rating ?? 4), // default 4 stars if none
+          id: completed.id || j.id, // Only pass id - let ActivityDetailScreen fetch fresh data
         },
       });
 
       j.onRepaired?.();
-      close();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Failed to complete request');
     }

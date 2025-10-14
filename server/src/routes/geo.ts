@@ -98,4 +98,116 @@ router.get('/places', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * Reverse geocoding function to convert lat/lng to address
+ */
+export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    // Try Geoapify first if API key is available
+    const geoapifyKey = process.env.GEOAPIFY_API_KEY;
+    if (geoapifyKey) {
+      const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}&apiKey=${geoapifyKey}`;
+      const response = await fetch(url);
+      
+      if (response.ok) {
+        const data = await response.json();
+        const feature = data?.features?.[0];
+        
+        if (feature?.properties) {
+          const props = feature.properties;
+          const address = props.formatted || 
+            [props.housenumber, props.street, props.city, props.state, props.country]
+              .filter(Boolean)
+              .join(', ');
+          
+          if (address) return address;
+        }
+      }
+    }
+
+    // Fallback to OpenStreetMap Nominatim (free service)
+    try {
+      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`;
+      const response = await fetch(nominatimUrl, {
+        headers: {
+          'User-Agent': 'OperatorApp/1.0'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.display_name) {
+          // Extract detailed location with subdivision/neighborhood
+          const address = data.display_name;
+          const parts = address.split(', ');
+          
+          // Build detailed address by including relevant parts
+          const relevantParts = [];
+          
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i].trim();
+            
+            // Skip very specific parts like house numbers, postal codes, country
+            if (part.match(/^\d+$/) || // Just numbers
+                part.includes('Philippines') || 
+                part.includes('5025') || // Postal codes
+                part.includes('Western Visayas') ||
+                part.includes('Region') ||
+                part.includes('Capital District') ||
+                part.includes('Metro Manila')) {
+              continue;
+            }
+            
+            // Include meaningful location parts (neighborhoods, districts, cities)
+            if (part.length > 2 && 
+                !part.includes('Street') && 
+                !part.includes('Road') && 
+                !part.includes('Avenue') &&
+                !part.includes('Boulevard')) {
+              relevantParts.push(part);
+            }
+          }
+          
+          // Return the relevant parts joined with commas
+          if (relevantParts.length > 0) {
+            return relevantParts.join(', ');
+          }
+          
+          // Fallback to original address if no good parts found
+          return address;
+        }
+      }
+    } catch (nominatimError) {
+      console.log('Nominatim geocoding failed:', nominatimError);
+    }
+
+    // Final fallback: Generate a readable address from coordinates
+    return `Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  } catch (error) {
+    console.error('Reverse geocoding error:', error);
+    return `Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  }
+}
+
+/**
+ * Test endpoint for reverse geocoding (for development)
+ */
+router.get('/test-reverse-geocode', async (req, res) => {
+  try {
+    const lat = Number(req.query.lat) || 10.7805;
+    const lng = Number(req.query.lng) || 122.4752;
+    
+    const address = await reverseGeocode(lat, lng);
+    
+    res.json({
+      lat,
+      lng,
+      address,
+      success: !!address
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

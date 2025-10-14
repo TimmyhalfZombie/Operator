@@ -177,21 +177,70 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       })
       .toArray();
 
-    const items = docs.map((d) => ({
-      id: String(d._id),
-      status: d.status || 'pending',
-      vehicle: d.vehicle || null,
-      location: d.location || null,
-      createdAt: d.createdAt || (d as any).created_at || null,
-      updatedAt: d.updatedAt || (d as any).updated_at || null,
-      assignedTo: d.assignedTo ? String(d.assignedTo) : null,
-      userId: d.userId ? String(d.userId) : null,
-      rating: d.rating ?? null,
-      completedAt: d.completedAt ?? null,
-      customerName: d.customerName || null,
-      clientName: d.clientName || null,
-      contactName: d.contactName || null,
-      customerPhone: d.customerPhone || null,
+    // Get operator information for each request
+    const items = await Promise.all(docs.map(async (d) => {
+      let operatorInfo = null;
+      
+      // For completed requests, show the operator who completed it
+      if (d.status === 'completed' && d.completedBy) {
+        try {
+          const operator = await db.collection('operators').findOne({ user_id: String(d.completedBy) });
+          if (operator) {
+            const lat = operator.last_lat;
+            const lng = operator.last_lng;
+            const lastSeen = operator.last_seen_at;
+            
+            operatorInfo = {
+              name: operator.name || 'Operator',
+              location: operator.last_address || (lat && lng ? 
+                `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+              lastSeen: lastSeen || null,
+            };
+          }
+        } catch (e) {
+          console.log('Error fetching operator info:', e);
+        }
+      }
+      // For accepted requests, show the assigned operator
+      else if (d.assignedTo || d.acceptedBy) {
+        try {
+          const operatorId = d.assignedTo || d.acceptedBy;
+          const operator = await db.collection('operators').findOne({ user_id: String(operatorId) });
+          if (operator) {
+            const lat = operator.last_lat;
+            const lng = operator.last_lng;
+            const lastSeen = operator.last_seen_at;
+            
+            operatorInfo = {
+              name: operator.name || 'Operator',
+              location: operator.last_address || (lat && lng ? 
+                `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+              lastSeen: lastSeen || null,
+              acceptedAt: d.updatedAt || d.updated_at || null, // Use updatedAt as acceptance time
+            };
+          }
+        } catch (e) {
+          console.log('Error fetching operator info:', e);
+        }
+      }
+
+      return {
+        id: String(d._id),
+        status: d.status || 'pending',
+        vehicle: d.vehicle || null,
+        location: d.location || null,
+        createdAt: d.createdAt || (d as any).created_at || null,
+        updatedAt: d.updatedAt || (d as any).updated_at || null,
+        assignedTo: d.assignedTo ? String(d.assignedTo) : null,
+        userId: d.userId ? String(d.userId) : null,
+        rating: d.rating ?? null,
+        completedAt: d.completedAt ?? null,
+        customerName: d.customerName || null,
+        clientName: d.clientName || null,
+        contactName: d.contactName || null,
+        customerPhone: d.customerPhone || null,
+        operator: operatorInfo,
+      };
     }));
 
     res.json({ items });
@@ -264,13 +313,62 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     if (!doc) return res.status(404).json({ message: 'Request not found' });
 
     const coords = extractCoords(doc);
+    
+    // Get operator information if available
+    let operatorInfo = null;
+    if (doc.status === 'completed' && doc.completedBy) {
+      try {
+        const operator = await db.collection('operators').findOne({ user_id: String(doc.completedBy) });
+        if (operator) {
+          const lat = operator.last_lat;
+          const lng = operator.last_lng;
+          const lastSeen = operator.last_seen_at;
+          
+          operatorInfo = {
+            name: operator.name || 'Operator',
+            location: operator.last_address || (lat && lng ? 
+              `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+            lastSeen: lastSeen || null,
+            acceptedAt: doc.updatedAt || doc.updated_at || null,
+          };
+        }
+      } catch (e) {
+        console.log('Error fetching operator info:', e);
+      }
+    } else if (doc.assignedTo || doc.acceptedBy) {
+      try {
+        const operatorId = doc.assignedTo || doc.acceptedBy;
+        const operator = await db.collection('operators').findOne({ user_id: String(operatorId) });
+        if (operator) {
+          const lat = operator.last_lat;
+          const lng = operator.last_lng;
+          const lastSeen = operator.last_seen_at;
+          
+          operatorInfo = {
+            name: operator.name || 'Operator',
+            location: operator.last_address || (lat && lng ? 
+              `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+            lastSeen: lastSeen || null,
+            acceptedAt: doc.updatedAt || doc.updated_at || null,
+          };
+        }
+      } catch (e) {
+        console.log('Error fetching operator info:', e);
+      }
+    }
+    
     res.json({
       id: String(doc._id),
       status: doc.status,
       clientName: pickClientName(doc),
+      customerName: doc.customerName || null,
+      contactName: doc.contactName || null,
+      customerPhone: doc.customerPhone || null,
       placeName: pickPlaceName(doc),
       address: pickAddress(doc),
       coords: coords || null,
+      vehicle: doc.vehicle || null,
+      location: doc.location || null,
       vehicleType: doc?.vehicle?.model ?? null,
       plateNumber: doc?.vehicle?.plate ?? null,
       phone: doc?.customerPhone ?? null,
@@ -279,6 +377,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       completedAt: doc?.completedAt ?? null,
       createdAt: doc?.createdAt ?? null,
       updatedAt: doc?.updatedAt ?? null,
+      operator: operatorInfo,
     });
   } catch (e) {
     next(e);

@@ -32,6 +32,10 @@ function normalize(raw: any): AssistanceRequest {
     createdAt: raw?.createdAt,
     updatedAt: raw?.updatedAt,
 
+    // Preserve the original location object for ActivityScreen
+    location: raw?.location,
+    vehicle: raw?.vehicle,
+
     _raw: raw,
   };
 }

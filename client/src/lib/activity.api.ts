@@ -14,6 +14,12 @@ export type AssistItem = {
   customerName?: string;
   contactName?: string;
   user?: { name?: string };
+  // Operator information
+  operator?: {
+    name?: string;
+    location?: string;
+    lastSeen?: string;
+  } | null;
 };
 
 /** Operator inbox: everyone’s requests */

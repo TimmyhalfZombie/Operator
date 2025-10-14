@@ -144,12 +144,13 @@ const ActivityScreen: React.FC = () => {
                 // Client information from database fields
                 const clientName = it?.clientName || 
                                  it?.customerName || 
-                                 it?.location?.contactName || 
-                                 it?.location?.contact?.name || 
                                  it?.contactName || 
-                                 it?.user?.name || 
                                  'Client';
-                const clientLocation = it?.location?.address || it?.destination?.address || 'Location';
+                const clientLocation = it?.location?.address || 
+                                     it?.location?.formatted_address || 
+                                     it?.location?.display_name ||
+                                     it?.address || 
+                                     'Location';
                 const date = formatWhen(it.createdAt);
                 
                 const title = clientName;

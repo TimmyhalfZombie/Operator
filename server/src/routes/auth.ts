@@ -24,7 +24,7 @@ function normalizeIdentifier(raw: string) {
 /* ------------------- REGISTER ------------------- */
 router.post('/register', async (req, res, next) => {
   try {
-    let { username, email, phone, password, lat, lng } = req.body || {};
+    let { username, email, phone, password, lat, lng, address } = req.body || {};
 
     username = String(username || '').trim();
     email = String(email || '').trim().toLowerCase();
@@ -54,12 +54,31 @@ router.post('/register', async (req, res, next) => {
     const latNum = Number(lat);
     const lngNum = Number(lng);
     const hasCoords = Number.isFinite(latNum) && Number.isFinite(lngNum);
+    
+    // Geocode coordinates to get real address if not provided
+    let realAddress = address;
+    if (hasCoords && !address) {
+      try {
+        const { reverseGeocode } = await import('./geo');
+        const geocodedAddress = await reverseGeocode(latNum, lngNum);
+        if (geocodedAddress) {
+          realAddress = geocodedAddress;
+        }
+      } catch (e) {
+        console.log('Reverse geocoding failed:', e);
+      }
+    }
 
     const doc = await users.insertOne({
       username,
       ...(email ? { email } : {}),
       ...(phoneNorm ? { phone: phoneNorm } : {}),
-      ...(hasCoords ? { initial_lat: latNum, initial_lng: lngNum, initial_loc_at: createdAt } : {}),
+      ...(hasCoords ? { 
+        initial_lat: latNum, 
+        initial_lng: lngNum, 
+        initial_address: realAddress || null,
+        initial_loc_at: createdAt 
+      } : {}),
       password_hash: hash,
       created_at: createdAt,
     });
@@ -74,6 +93,7 @@ router.post('/register', async (req, res, next) => {
             user_id: String(doc.insertedId),
             last_lat: latNum,
             last_lng: lngNum,
+            last_address: realAddress || null,
             last_seen_at: createdAt,
             accuracy_m: 50,
             source: 'device',

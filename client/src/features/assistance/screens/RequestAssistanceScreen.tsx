@@ -1,8 +1,6 @@
-import { router } from 'expo-router'; // ⬅️ Expo Router navigation
 import React from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import GeoapifyMap from '../../../components/GeoapifyMap';
-import { completeAssist } from '../../assistance/api';
 import useAcceptedJobUI from '../../useAcceptedJobUI';
 import { useNextAssist } from '../../useNextRequest';
 import RequestBottomCard from '../components/RequestBottomCard';
@@ -41,24 +39,8 @@ export default function RequestAssistanceScreen() {
         if (completingRef.current) return;
         completingRef.current = true;
         try {
-          // 1) mark completed on the server
-          const detail = await completeAssist(data.id);
-
-          // 2) go to the Activity detail route with params for your UI
-          router.push({
-            pathname: '/activity-detail',
-            params: {
-              id: detail.id || data.id, // Add id parameter for database lookup
-              customer: detail.clientName ?? data.clientName,
-              timeRange: detail.completedAt ?? '',
-              status: 'Repaired',
-              startName: detail.startName ?? 'Start',
-              startAddr: detail.startAddr ?? '',
-              endName: detail.endName ?? detail.placeName ?? data.placeName,
-              endAddr: detail.endAddr ?? detail.address ?? data.address,
-              rating: String(detail.rating ?? 0),
-            },
-          });
+          // Navigation is handled by useAcceptedJobUI.tsx
+          // No need to navigate here to prevent double navigation
         } catch (e: any) {
           Alert.alert('Error', e?.message ?? 'Failed to complete.');
         } finally {

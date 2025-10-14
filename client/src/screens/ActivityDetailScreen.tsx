@@ -1,9 +1,14 @@
-import React from 'react';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
-import * as Icons from 'phosphor-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import * as Icons from 'phosphor-react-native';
+import React from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAssistById } from '../features/assistance/api';
+
+// Inter font families (ensure these are loaded in your app)
+const INTER_BLACK = 'Inter-Black';
+const INTER_MEDIUM = 'Inter-Medium';
+const INTER_REGULAR = 'Inter-Regular';
 
 const BG = '#000000ff';
 const CARD = '#141414';
@@ -61,20 +66,60 @@ export default function ActivityDetailScreen() {
     return () => { live = false; };
   }, [p.id]);
 
-  // Prefer DB (doc), fall back to params, then sensible defaults
-  const customer = doc?.clientName ?? p.customer ?? 'Customer';
-  const startName = p.startName || doc?._raw?.origin?.name || 'Start';
-  const startAddr = p.startAddr || doc?._raw?.origin?.address || '';
-  const endName = p.endName || doc?.placeName || 'Destination';
-  const endAddr = p.endAddr || doc?.address || '';
-  const status = (doc?.status || p.status || 'Repaired') as string;
-  const ratingNum = Number(
-    doc?._raw?.rating ?? (doc?.rating as any) ?? p.rating ?? 0
-  );
-  const rating = Math.max(0, Math.min(5, Number.isFinite(ratingNum) ? ratingNum : 0));
+  // Only calculate data when doc exists to prevent fallback flash
+  let customer: string = 'Customer', contactName: string | null = null, customerPhone: string | null = null, startName: string = 'Start', startAddr: string = '', endName: string = 'Vehicle', endAddr: string = 'Location', status: string = 'Repaired', timeRepaired: string | null = null, rating: number = 0, timeRange: string = '—';
+  
+  if (doc) {
+    // Prefer DB (doc), fall back to params, then sensible defaults
+    customer = doc?.clientName ?? doc?.customerName ?? p.customer ?? 'Customer';
+    contactName = doc?.contactName || null;
+    customerPhone = doc?.customerPhone || null;
+    
+    // Use operator information based on request status
+    startName = 'Start';
+    startAddr = '';
+    
+    if (doc?.operator) {
+      const operatorName = doc.operator.name || 'Operator';
+      const operatorLocation = doc.operator.location || 'Location unknown';
+      const operatorLastSeen = doc.operator.lastSeen ? new Date(doc.operator.lastSeen).toLocaleString() : 'Unknown time';
+      const operatorAcceptedAt = doc.operator.acceptedAt ? new Date(doc.operator.acceptedAt).toLocaleString() : null;
+      
+      if (doc.status === 'completed') {
+        // For completed requests, show the operator who completed it
+        startName = `${operatorName} - ${operatorLocation}`;
+        startAddr = `Completed at: ${operatorLastSeen}`;
+      } else if (doc.status === 'accepted') {
+        // For accepted requests, show the operator location and acceptance time
+        startName = `${operatorName} - ${operatorLocation}`;
+        startAddr = operatorAcceptedAt ? `Accepted at: ${operatorAcceptedAt}` : `Last seen: ${operatorLastSeen}`;
+      } else {
+        // For other statuses, show the assigned operator
+        startName = `${operatorName} - ${operatorLocation}`;
+        startAddr = `Last seen: ${operatorLastSeen}`;
+      }
+    } else {
+      // For pending requests or when no operator is assigned
+      startName = 'Start';
+      startAddr = 'Waiting for operator assignment';
+    }
+    // Update destination to show vehicle model and client location
+    const vehicleModel = doc?.vehicle?.model || 'Vehicle';
+    const clientLocation = doc?.location?.address || doc?.address || 'Location';
+    endName = `${vehicleModel}`;
+    endAddr = `${clientLocation}`;
+    
+    status = (doc?.status || p.status || 'Repaired') as string;
+    
+    // Get time repaired for completed requests
+    timeRepaired = doc?.completedAt ? new Date(doc.completedAt).toLocaleString() : null;
+    const ratingNum = Number(
+      doc?._raw?.rating ?? (doc?.rating as any) ?? p.rating ?? 0
+    );
+    rating = Math.max(0, Math.min(5, Number.isFinite(ratingNum) ? ratingNum : 0));
 
-  const timeRange =
-    p.timeRange || fmtRange(doc?.createdAt, doc?.updatedAt) || '—';
+    timeRange = p.timeRange || fmtRange(doc?.createdAt, doc?.updatedAt) || '—';
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -89,11 +134,14 @@ export default function ActivityDetailScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: BG }}>
           <ActivityIndicator />
         </View>
-      ) : (
+      ) : doc ? (
         <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 24 }}>
           {err ? <Text style={{ color: '#ff9d9d', marginBottom: 8 }}>{err}</Text> : null}
 
           <Text style={styles.timeText}>{timeRange}</Text>
+          {timeRepaired && (
+            <Text style={styles.timeRepairedText}>Repaired at: {timeRepaired}</Text>
+          )}
           <Text style={styles.statusText}>{status}</Text>
 
           {/* Customer Card */}
@@ -102,15 +150,21 @@ export default function ActivityDetailScreen() {
               <View style={styles.avatar} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.customerName}>{customer}</Text>
+                {contactName && (
+                  <Text style={styles.customerContact}>Contact: {contactName}</Text>
+                )}
+                {customerPhone && (
+                  <Text style={styles.customerPhone}>Phone: {customerPhone}</Text>
+                )}
               </View>
               <TouchableOpacity hitSlop={10} style={styles.iconBtn}>
-                <Icons.EnvelopeSimple size={18} color={GREEN_DIM} />
+                <Icons.EnvelopeSimple size={22} color={GREEN_DIM} weight="bold" />
               </TouchableOpacity>
             </View>
           </View>
 
           {/* Route Card */}
-          <View style={styles.card}>
+          <View style={styles.routeCard}>
             <View style={styles.routeRow}>
               <View style={styles.bulletBlue} />
               <View style={styles.routeRight}>
@@ -149,6 +203,10 @@ export default function ActivityDetailScreen() {
             </View>
           </View>
         </ScrollView>
+      ) : (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: BG }}>
+          <Text style={{ color: '#ff9d9d' }}>No data available</Text>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -166,16 +224,44 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 8,
   },
   scroll: { paddingHorizontal: 14, paddingTop: 12 },
-  timeText: { color: WHITE, opacity: 0.85, fontSize: 13, marginBottom: 2 },
-  statusText: { color: GREEN, fontSize: 13, marginBottom: 12 },
+  timeText: { 
+    color: WHITE, 
+    opacity: 0.85, 
+    fontSize: 13, 
+    marginBottom: 2,
+    fontFamily: INTER_BLACK,
+  },
+  statusText: { 
+    color: GREEN, 
+    fontSize: 18, 
+    marginBottom: 12,
+    fontFamily: INTER_BLACK,
+  },
+  timeRepairedText: {
+    color: '#B0B0B0',
+    fontSize: 14,
+    marginBottom: 8,
+    fontFamily: INTER_MEDIUM,
+  },
 
   card: {
     backgroundColor: CARD,
     borderColor: BORDER,
     borderWidth: 1,
     borderRadius: 12,
-    padding: 14,
-    marginVertical: 8,
+    padding: 18,
+    marginVertical: 10,
+    minHeight: 80,
+  },
+
+  routeCard: {
+    backgroundColor: CARD,
+    borderColor: BORDER,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 18,
+    marginVertical: 10,
+    minHeight: 450,
   },
 
   row: { flexDirection: 'row', alignItems: 'center' },
@@ -183,24 +269,86 @@ const styles = StyleSheet.create({
     width: 42, height: 42, borderRadius: 21,
     backgroundColor: '#d9d9d9', marginRight: 12,
   },
-  customerName: { color: WHITE, fontWeight: '700' },
+  customerName: { 
+    color: WHITE, 
+    fontWeight: '700',
+    fontFamily: INTER_BLACK,
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  customerContact: {
+    color: '#B0B0B0',
+    fontSize: 14,
+    fontFamily: INTER_MEDIUM,
+    marginBottom: 2,
+  },
+  customerPhone: {
+    color: '#B0B0B0',
+    fontSize: 14,
+    fontFamily: INTER_MEDIUM,
+  },
   iconBtn: {
     width: 32, height: 32, borderRadius: 16,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: BORDER,
   },
 
-  routeRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  routeRight: { flex: 1, marginLeft: 10 },
-  bulletBlue: { width: 10, height: 10, borderRadius: 6, backgroundColor: BLUE, marginTop: 3 },
-  bulletRed: { width: 10, height: 10, borderRadius: 6, backgroundColor: RED, marginTop: 3 },
-  routeLine: {
-    height: 22, width: 2, backgroundColor: BORDER,
-    marginLeft: 4, marginVertical: 2,
+  routeRow: { 
+    flexDirection: 'row', 
+    alignItems: 'flex-start',
+    paddingVertical: 12,
+    minHeight: 60,
   },
-  placeName: { color: WHITE, fontWeight: '800' },
-  addr: { color: SUB, fontSize: 12, marginTop: 2 },
+  routeRight: { 
+    flex: 1, 
+    marginLeft: 16,
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  bulletBlue: { 
+    width: 14, 
+    height: 14, 
+    borderRadius: 7, 
+    backgroundColor: BLUE, 
+    marginTop: 8,
+    marginRight: 6,
+  },
+  bulletRed: { 
+    width: 14, 
+    height: 14, 
+    borderRadius: 7, 
+    backgroundColor: RED, 
+    marginTop: 8,
+    marginRight: 6,
+  },
+  routeLine: {
+    height: 240, 
+    width: 3, 
+    backgroundColor: BORDER,
+    marginLeft: 6, 
+    marginVertical: 6,
+  },
+  placeName: { 
+    color: WHITE, 
+    fontWeight: '800',
+    fontFamily: INTER_BLACK,
+    fontSize: 18,
+    marginBottom: 6,
+  },
+  addr: { 
+    color: SUB, 
+    fontSize: 14, 
+    marginTop: 4,
+    fontFamily: INTER_MEDIUM,
+    lineHeight: 20,
+  },
 
-  ratingTitle: { color: WHITE, opacity: 0.9, marginBottom: 10, textAlign: 'center' },
+  ratingTitle: { 
+    color: WHITE, 
+    opacity: 0.9, 
+    marginBottom: 10, 
+    textAlign: 'center',
+    fontFamily: INTER_MEDIUM,
+  },
   starsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 });
