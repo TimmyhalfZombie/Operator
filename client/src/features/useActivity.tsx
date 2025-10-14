@@ -32,10 +32,10 @@ export function useActivity() {
     // Initial load
     load(false);
     
-    // Start polling every 500ms for instant updates
+    // Start polling every 10 seconds for updates
     intervalRef.current = setInterval(() => {
       load(true);
-    }, 500);
+    }, 10000);
 
     // Handle app state changes
     const sub = AppState.addEventListener('change', (nextAppState) => {

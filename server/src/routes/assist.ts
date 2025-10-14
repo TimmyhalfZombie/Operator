@@ -333,7 +333,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
           };
         }
       } catch (e) {
-        console.log('Error fetching operator info:', e);
+        // Error fetching operator info - silently continue
       }
     } else if (doc.assignedTo || doc.acceptedBy) {
       try {
@@ -353,7 +353,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
           };
         }
       } catch (e) {
-        console.log('Error fetching operator info:', e);
+        // Error fetching operator info - silently continue
       }
     }
     
