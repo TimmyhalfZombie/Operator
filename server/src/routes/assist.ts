@@ -407,7 +407,7 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
       { returnDocument: 'after' }
     );
 
-    if (!result.value) return res.status(404).json({ message: 'Request not found or not pending' });
+    if (!result || !result.value) return res.status(404).json({ message: 'Request not found or not pending' });
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -422,13 +422,27 @@ router.post('/:id/decline', requireAuth, async (req, res, next) => {
     const db = getCustomerDb();
     const coll = db.collection('assistrequests');
 
+    // First check if the request exists
+    const existingRequest = await coll.findOne({ _id: new ObjectId(id) });
+    if (!existingRequest) {
+      return res.status(404).json({ message: 'Request not found' });
+    }
+
+    // Check if request can be declined
+    if (existingRequest.status === 'completed') {
+      return res.status(400).json({ message: 'Cannot decline completed request' });
+    }
+
     const result = await coll.findOneAndUpdate(
       { _id: new ObjectId(id), status: { $in: ['pending', 'accepted'] } },
       { $set: { status: 'declined', updatedAt: new Date() } },
       { returnDocument: 'after' }
     );
 
-    if (!result.value) return res.status(404).json({ message: 'Request not found' });
+    if (!result || !result.value) {
+      return res.status(400).json({ message: 'Request cannot be declined in current status' });
+    }
+
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -467,7 +481,7 @@ router.post('/:id/complete', requireAuth, async (req, res, next) => {
       { returnDocument: 'after' }
     );
 
-    if (!result.value) return res.status(404).json({ message: 'Request not found' });
+    if (!result || !result.value) return res.status(404).json({ message: 'Request not found' });
 
     const doc: any = result.value;
 

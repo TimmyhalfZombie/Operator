@@ -1,6 +1,9 @@
+import { router } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import DeclineConfirmationModal from '../../../components/DeclineConfirmationModal';
 import GeoapifyMap from '../../../components/GeoapifyMap';
+import { useDeclinedRequests } from '../../../contexts/DeclinedRequestsContext';
 import useAcceptedJobUI from '../../useAcceptedJobUI';
 import { useNextAssist } from '../../useNextRequest';
 import RequestBottomCard from '../components/RequestBottomCard';
@@ -9,9 +12,11 @@ type LatLng = { lat: number; lng: number };
 
 export default function RequestAssistanceScreen() {
   const { data, loading, error, reload, accept, decline } = useNextAssist();
+  const { markAsDeclined } = useDeclinedRequests();
   const acceptedUI = useAcceptedJobUI();
   const [accepted, setAccepted] = React.useState(false);
   const [acceptedCoords, setAcceptedCoords] = React.useState<LatLng | undefined>(undefined);
+  const [showDeclineModal, setShowDeclineModal] = React.useState(false);
 
   // prevent duplicate "Repaired" calls
   const completingRef = React.useRef(false);
@@ -66,12 +71,21 @@ export default function RequestAssistanceScreen() {
   };
 
   const onDecline = async () => {
-    try {
-      if (data) await decline(data.id);
-      Alert.alert('Declined');
-    } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Failed');
+    setShowDeclineModal(true);
+  };
+
+  const handleDeclineConfirm = () => {
+    setShowDeclineModal(false);
+    // Mark as declined locally (without changing database status)
+    if (data) {
+      markAsDeclined(data.id);
     }
+    // Navigate back to ActivityScreen - request stays pending in database
+    router.back();
+  };
+
+  const handleDeclineCancel = () => {
+    setShowDeclineModal(false);
   };
 
   const lat = data?.coords?.lat ?? acceptedCoords?.lat;
@@ -94,6 +108,13 @@ export default function RequestAssistanceScreen() {
 
       {/* ACCEPTED state → full card with pills + Repaired/Power */}
       {acceptedUI.element}
+
+      {/* Decline Confirmation Modal */}
+      <DeclineConfirmationModal
+        visible={showDeclineModal}
+        onConfirm={handleDeclineConfirm}
+        onCancel={handleDeclineCancel}
+      />
     </View>
   );
 }

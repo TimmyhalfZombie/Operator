@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import { tokens } from '../src/auth/tokenStore';
+import { DeclinedRequestsProvider } from '../src/contexts/DeclinedRequestsContext';
 import { useImmersiveMode } from '../src/hooks/useImmersiveMode';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -44,9 +45,9 @@ export default function RootLayout() {
   if (!ready) return null;
 
   return (
-    <>
+    <DeclinedRequestsProvider>
       <StatusBar style="light" hidden={false} />
       <Stack screenOptions={{ headerShown: false }} onLayout={onLayoutRootView} />
-    </>
+    </DeclinedRequestsProvider>
   );
 }

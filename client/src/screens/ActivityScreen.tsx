@@ -14,7 +14,7 @@ import { useImmersiveMode } from '../hooks/useImmersiveMode';
 
 const BG = '#121212';
 const TEXT = '#EDEDED';
-const SUBTEXT = '#9AA09C';
+const SUBTEXT = '#bababaff'; // lighter subtext
 const DIVIDER = '#1F1F1F';
 const GREEN = '#6EFF87';
 
@@ -44,7 +44,18 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
         <View style={styles.itemTextWrap}>
           {isNew && <Text style={styles.badgeNew}>Request assistance</Text>}
           <Text numberOfLines={1} style={styles.itemTitle}>{title}</Text>
-          {!!subtitle && <Text style={styles.itemSubtitle}>{subtitle}</Text>}
+          {!!subtitle && (
+            <Text style={styles.itemSubtitle}>
+              {subtitle.split('\n').map((line, index, arr) => (
+                <Text
+                  key={index}
+                  style={index === 0 ? styles.vehicleModel : styles.itemSubtitle}
+                >
+                  {line}{index < arr.length - 1 ? '\n' : ''}
+                </Text>
+              ))}
+            </Text>
+          )}
         </View>
       </View>
       <View style={styles.itemRight}>
@@ -146,6 +157,9 @@ const ActivityScreen: React.FC = () => {
                                  it?.customerName || 
                                  it?.contactName || 
                                  'Client';
+                const vehicleModel = it?.vehicle?.model || 
+                                   it?.vehicleType || 
+                                   'Vehicle';
                 const clientLocation = it?.location?.address || 
                                      it?.location?.formatted_address || 
                                      it?.location?.display_name ||
@@ -154,7 +168,7 @@ const ActivityScreen: React.FC = () => {
                 const date = formatWhen(it.createdAt);
                 
                 const title = clientName;
-                const subtitle = `${clientLocation} • ${date}`;
+                const subtitle = `${vehicleModel}\n${clientLocation}\n${date}`;
 
                 // Client location from Mongo: coordinates = [lng, lat]
                 const clientLng = it?.location?.coordinates?.[0];
@@ -257,18 +271,23 @@ const styles = StyleSheet.create({
 
   itemTitle: { 
     color: TEXT, 
-    fontSize: 16, 
-    fontFamily: INTER_BLACK,
+    fontSize: 18,            // bigger
+    fontFamily: INTER_BLACK, // bolder
   },
 
   itemSubtitle: {
     color: SUBTEXT, 
-    fontSize: 13, 
-    marginTop: 2, 
-    fontFamily: INTER_BLACK,
-    fontWeight: 'bold',
+    fontSize: 14,
+    fontFamily: INTER_MEDIUM,            // bigger // bolder
+    // removed fontWeight to avoid conflicts with custom font
   },
 
+  vehicleModel: {
+    fontSize: 16,            // bigger
+    fontFamily: INTER_BLACK, // bolder
+    color: '#F0F0F0',        // lighter color
+    marginTop: 2,
+  },
 
   itemRight: { width: 28, alignItems: 'flex-end' },
   newDot: { width: 10, height: 10, borderRadius: 6, backgroundColor: GREEN },
