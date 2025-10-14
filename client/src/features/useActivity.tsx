@@ -1,31 +1,60 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { fetchOperatorInbox, AssistItem } from '../lib/activity.api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
+import { AssistItem, fetchOperatorInbox } from '../lib/activity.api';
 
 export function useActivity() {
   const [items, setItems] = useState<AssistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const load = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
-      // For an inbox feel, show newest first; you can pass status='pending' to only show new items.
       const data = await fetchOperatorInbox({ limit: 100 });
       setItems(data);
+      if (!silent) setError(null);
     } catch (e) {
-      setError(e);
-      setItems([]);
+      if (!silent) {
+        setError(e);
+        setItems([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    // Initial load
+    load(false);
+    
+    // Start polling every 500ms for instant updates
+    intervalRef.current = setInterval(() => {
+      load(true);
+    }, 500);
+
+    // Handle app state changes
+    const sub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        load(true);
+      }
+    });
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      sub.remove();
+    };
+  }, [load]);
 
   // Split into "New" (pending) vs "Recent" (non-pending)
   const newItems = useMemo(() => items.filter(i => (i.status || 'pending') === 'pending'), [items]);
   const recentItems = useMemo(() => items.filter(i => (i.status || 'pending') !== 'pending'), [items]);
 
-  return { items, newItems, recentItems, loading, error, refresh };
+  return { items, newItems, recentItems, loading, error };
 }

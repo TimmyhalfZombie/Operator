@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FONTS } from '../constants/Fonts';
 
 type Props = {
   visible: boolean;
@@ -51,13 +52,15 @@ const styles = StyleSheet.create({
      color: '#fff', 
      fontSize: 18, 
      fontWeight: 'bold',
-      marginBottom: 6 
+     fontFamily: FONTS.INTER_BOLD,
+     marginBottom: 6 
     },
 
   body: { 
     color: '#cfcfcf',
-     marginBottom: 14, 
-     lineHeight: 20 
+    fontFamily: FONTS.INTER_REGULAR,
+    marginBottom: 14, 
+    lineHeight: 20 
     },
 
   row: { 
@@ -80,13 +83,15 @@ const styles = StyleSheet.create({
 
   btnGhostText: { 
     color: '#cfcfcf', 
-    fontWeight: '600'
+    fontWeight: '600',
+    fontFamily: FONTS.INTER_SEMIBOLD
    },
   btnPrimary: {
      backgroundColor: '#44ff75' 
     },
   btnPrimaryText: { 
     color: '#111', 
-    fontWeight: '700' 
+    fontWeight: '700',
+    fontFamily: FONTS.INTER_BOLD
   },
 });

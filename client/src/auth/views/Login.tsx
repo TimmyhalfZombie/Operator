@@ -1,18 +1,18 @@
-import React, { useRef, useEffect, useState } from 'react';
-import {
-  Pressable,
-  SafeAreaView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  ActivityIndicator,
-  Animated,
-  Easing,
-} from 'react-native';
 import * as Icons from 'phosphor-react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Animated,
+    Easing,
+    Pressable,
+    SafeAreaView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 
 type Values = { identifier: string; password: string; remember: boolean };
 type Props = {

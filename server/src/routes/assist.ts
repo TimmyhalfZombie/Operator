@@ -1,17 +1,17 @@
 import { Router } from 'express';
 import { ObjectId } from 'mongodb';
-import { requireAuth } from '../middleware/jwt';
 import { getCustomerDb } from '../db/connect';
+import { requireAuth } from '../middleware/jwt';
 
 const router = Router();
 
 /* --------------------------------------------------------------------------------
- * Helpers to normalize fields
+ * Helpers
  * -------------------------------------------------------------------------------*/
 function pickClientName(d: any): string {
   return (
-    d?.customerName ||
     d?.clientName ||
+    d?.customerName ||
     d?.location?.contactName ||
     d?.location?.contact?.name ||
     d?.contactName ||
@@ -19,11 +19,9 @@ function pickClientName(d: any): string {
     'Customer'
   );
 }
-
 function pickPlaceName(d: any): string {
-  return d?.placeName || d?.location?.name || d?.vehicle?.model || d?.location?.address || 'Location';
+  return d?.placeName || d?.location?.name || d?.vehicle?.model || 'Location';
 }
-
 function pickAddress(d: any): string {
   return (
     d?.address ||
@@ -33,23 +31,19 @@ function pickAddress(d: any): string {
     ''
   );
 }
-
-/* ---------- coordinate extraction ---------- */
 function toNum(n: any): number | null {
   const v = Number(n);
   return Number.isFinite(v) ? v : null;
 }
+/** Try to get {lat,lng} from several shapes */
 function extractCoords(d: any): { lat: number; lng: number } | null {
-  // 1) direct { coords: {lat,lng} }
   if (d?.coords && toNum(d.coords.lat) != null && toNum(d.coords.lng) != null) {
     return { lat: toNum(d.coords.lat)!, lng: toNum(d.coords.lng)! };
   }
-  // 2) location.coords or location.coordinate
   const lc = d?.location?.coords || d?.location?.coordinate;
   if (lc && toNum(lc.lat) != null && toNum(lc.lng) != null) {
     return { lat: toNum(lc.lat)!, lng: toNum(lc.lng)! };
   }
-  // 3) location.{lat,lng|lon|longitude}
   const ll = d?.location || d;
   if (
     toNum(ll?.lat) != null &&
@@ -59,12 +53,10 @@ function extractCoords(d: any): { lat: number; lng: number } | null {
     const lng = toNum(ll.lng) ?? toNum(ll.lon) ?? toNum(ll.longitude)!;
     return { lat, lng };
   }
-  // 4) GeoJSON: location.geometry.coordinates [lng, lat]
   const g1 = d?.location?.geometry?.coordinates;
   if (Array.isArray(g1) && toNum(g1[0]) != null && toNum(g1[1]) != null) {
     return { lat: toNum(g1[1])!, lng: toNum(g1[0])! };
   }
-  // 5) Plain coordinates array: location.coordinates or coordinates [lng, lat]
   const g2 = d?.location?.coordinates || d?.coordinates;
   if (Array.isArray(g2) && toNum(g2[0]) != null && toNum(g2[1]) != null) {
     return { lat: toNum(g2[1])!, lng: toNum(g2[0])! };
@@ -72,20 +64,17 @@ function extractCoords(d: any): { lat: number; lng: number } | null {
   return null;
 }
 
-/* ---------- Geoapify forward geocoding fallback ---------- */
+/* ---------- optional: Geoapify geocode fallback ---------- */
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
   const KEY = process.env.GEOAPIFY_API_KEY;
-  if (!KEY || !address.trim()) return null;
+  if (!KEY || !address?.trim()) return null;
 
   const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(
     address
   )}&limit=1&apiKey=${KEY}`;
 
   const r = await fetch(url);
-  if (!r.ok) {
-    console.warn('[geoapify] HTTP', r.status, address);
-    return null;
-  }
+  if (!r.ok) return null;
   const j = await r.json();
   const f = j?.features?.[0]?.properties;
   const lat = toNum(f?.lat);
@@ -94,10 +83,10 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
   return null;
 }
 
-/* ================================================================================
- * CLIENT (current user only)
- * GET /api/assist/mine?limit=100&status=pending|accepted|completed
- * ================================================================================*/
+/* ================================================================================ */
+/* CLIENT (current user) */
+/* GET /api/assist/mine?limit=100&status=pending|accepted|completed                 */
+/* ================================================================================ */
 router.get('/mine', requireAuth, async (req, res, next) => {
   try {
     const user = (req as any).user as { id: string; email?: string };
@@ -125,6 +114,8 @@ router.get('/mine', requireAuth, async (req, res, next) => {
           updatedAt: 1,
           assignedTo: 1,
           userId: 1,
+          rating: 1,
+          completedAt: 1,
         },
       })
       .toArray();
@@ -138,6 +129,8 @@ router.get('/mine', requireAuth, async (req, res, next) => {
       updatedAt: d.updatedAt || (d as any).updated_at || null,
       assignedTo: d.assignedTo ? String(d.assignedTo) : null,
       userId: d.userId ? String(d.userId) : null,
+      rating: d.rating ?? null,
+      completedAt: d.completedAt ?? null,
     }));
 
     res.json({ items });
@@ -146,10 +139,10 @@ router.get('/mine', requireAuth, async (req, res, next) => {
   }
 });
 
-/* ================================================================================
- * OPERATOR (see everyone’s requests)
- * GET /api/assist/inbox?status=pending|accepted|completed&limit=100
- * ================================================================================*/
+/* ================================================================================ */
+/* OPERATOR inbox */
+/* GET /api/assist/inbox?status=pending|accepted|completed&limit=100               */
+/* ================================================================================ */
 router.get('/inbox', requireAuth, async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 200);
@@ -174,6 +167,12 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
           updatedAt: 1,
           assignedTo: 1,
           userId: 1,
+          rating: 1,
+          completedAt: 1,
+          customerName: 1,
+          clientName: 1,
+          contactName: 1,
+          customerPhone: 1,
         },
       })
       .toArray();
@@ -187,6 +186,12 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       updatedAt: d.updatedAt || (d as any).updated_at || null,
       assignedTo: d.assignedTo ? String(d.assignedTo) : null,
       userId: d.userId ? String(d.userId) : null,
+      rating: d.rating ?? null,
+      completedAt: d.completedAt ?? null,
+      customerName: d.customerName || null,
+      clientName: d.clientName || null,
+      contactName: d.contactName || null,
+      customerPhone: d.customerPhone || null,
     }));
 
     res.json({ items });
@@ -195,22 +200,18 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
   }
 });
 
-/* ================================================================================
- * /next with geocoding fallback & full details
- * GET /api/assist/next → newest pending request
- * ================================================================================*/
+/* ================================================================================ */
+/* GET /api/assist/next – newest pending; geocode & persist coords if missing      */
+/* ================================================================================ */
 router.get('/next', requireAuth, async (_req, res, next) => {
   try {
     const db = getCustomerDb();
     const coll = db.collection('assistrequests');
 
     const doc = await coll.findOne({ status: 'pending' }, { sort: { createdAt: -1 } });
-
     if (!doc) return res.json({ ok: true, data: null });
 
     let coords = extractCoords(doc);
-
-    // If missing, try Geoapify geocoding and persist the result
     if (!coords) {
       const address = pickAddress(doc);
       const gc = await geocodeAddress(address);
@@ -220,7 +221,7 @@ router.get('/next', requireAuth, async (_req, res, next) => {
           { _id: (doc as any)._id },
           {
             $set: {
-              coords: gc, // top-level for quick access
+              coords: gc,
               'location.coords': gc,
               updatedAt: new Date(),
             },
@@ -237,12 +238,10 @@ router.get('/next', requireAuth, async (_req, res, next) => {
         placeName: pickPlaceName(doc),
         address: pickAddress(doc),
         coords: coords || null,
-
-        // EXTRA FIELDS FOR UI (pulled directly from your DB shape)
-        phone: doc.customerPhone ?? null,
-        vehicleType: doc.vehicle?.model ?? null,
-        plateNumber: doc.vehicle?.plate ?? null,
-        otherInfo: doc.vehicle?.notes ?? null,
+        vehicleType: doc?.vehicle?.model ?? null,
+        plateNumber: doc?.vehicle?.plate ?? null,
+        phone: doc?.customerPhone ?? null,
+        otherInfo: doc?.vehicle?.notes ?? null,
       },
     });
   } catch (e) {
@@ -250,9 +249,45 @@ router.get('/next', requireAuth, async (_req, res, next) => {
   }
 });
 
-/* ================================================================================
- * Accept / Decline
- * ================================================================================*/
+/* ================================================================================ */
+/* Single request (detail) – GET /api/assist/:id                                    */
+/* ================================================================================ */
+router.get('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid id' });
+
+    const db = getCustomerDb();
+    const coll = db.collection('assistrequests');
+
+    const doc = await coll.findOne({ _id: new ObjectId(id) });
+    if (!doc) return res.status(404).json({ message: 'Request not found' });
+
+    const coords = extractCoords(doc);
+    res.json({
+      id: String(doc._id),
+      status: doc.status,
+      clientName: pickClientName(doc),
+      placeName: pickPlaceName(doc),
+      address: pickAddress(doc),
+      coords: coords || null,
+      vehicleType: doc?.vehicle?.model ?? null,
+      plateNumber: doc?.vehicle?.plate ?? null,
+      phone: doc?.customerPhone ?? null,
+      otherInfo: doc?.vehicle?.notes ?? null,
+      rating: doc?.rating ?? null,
+      completedAt: doc?.completedAt ?? null,
+      createdAt: doc?.createdAt ?? null,
+      updatedAt: doc?.updatedAt ?? null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ================================================================================ */
+/* Accept / Decline                                                                 */
+/* ================================================================================ */
 router.post('/:id/accept', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -274,24 +309,7 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
     );
 
     if (!result.value) return res.status(404).json({ message: 'Request not found or not pending' });
-
-    // Optionally return normalized payload (client currently doesn’t use it, but it’s handy)
-    const d = result.value;
-    return res.json({
-      ok: true,
-      data: {
-        id: String(d._id),
-        clientName: pickClientName(d),
-        placeName: pickPlaceName(d),
-        address: pickAddress(d),
-        coords: extractCoords(d) || null,
-        phone: d.customerPhone ?? null,
-        vehicleType: d.vehicle?.model ?? null,
-        plateNumber: d.vehicle?.plate ?? null,
-        otherInfo: d.vehicle?.notes ?? null,
-        status: d.status || 'accepted',
-      },
-    });
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }
@@ -313,6 +331,77 @@ router.post('/:id/decline', requireAuth, async (req, res, next) => {
 
     if (!result.value) return res.status(404).json({ message: 'Request not found' });
     res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ================================================================================ */
+/* Complete (Repaired) – POST /api/assist/:id/complete { rating?: number }          */
+/* ================================================================================ */
+router.post('/:id/complete', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const ratingRaw = req.body?.rating;
+    const rating =
+      ratingRaw === undefined || ratingRaw === null
+        ? undefined
+        : Math.max(0, Math.min(5, Number(ratingRaw)));
+
+    if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid id' });
+
+    const db = getCustomerDb();
+    const coll = db.collection('assistrequests');
+
+    // Relaxed filter: complete by id (unless hard-deleted)
+    const set: any = {
+      status: 'completed',
+      completedAt: new Date(),
+      updatedAt: new Date(),
+      completedBy: new ObjectId((req as any).user.id),
+    };
+    if (rating !== undefined && Number.isFinite(rating)) set.rating = rating;
+
+    const result = await coll.findOneAndUpdate(
+      { _id: new ObjectId(id), status: { $ne: 'deleted' } },
+      { $set: set },
+      { returnDocument: 'after' }
+    );
+
+    if (!result.value) return res.status(404).json({ message: 'Request not found' });
+
+    const doc: any = result.value;
+
+    // Build a rich payload for the Activity detail screen
+    const endName = pickPlaceName(doc);
+    const endAddr = pickAddress(doc);
+
+    res.json({
+      ok: true,
+      data: {
+        id: String(doc._id),
+        status: doc.status,
+        completedAt: doc.completedAt ?? new Date(),
+
+        clientName: pickClientName(doc),
+        phone: doc?.customerPhone ?? doc?.phone ?? null,
+
+        placeName: endName,
+        address: endAddr,
+
+        vehicleType: doc?.vehicle?.model ?? null,
+        plateNumber: doc?.vehicle?.plate ?? null,
+        otherInfo: doc?.vehicle?.notes ?? null,
+
+        // optional summary fields for the detail screen:
+        startName: doc.startName ?? 'Start',
+        startAddr: doc.startAddr ?? '',
+        endName,
+        endAddr,
+
+        rating: doc.rating ?? (rating ?? null),
+      },
+    });
   } catch (e) {
     next(e);
   }

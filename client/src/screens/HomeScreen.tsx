@@ -3,9 +3,17 @@ import { Alert, PermissionsAndroid, Platform, ScrollView, StyleSheet, Text, Touc
 import BLEDeviceCard from '../components/BLEDeviceCard';
 import TemperatureDial from '../components/TemperatureDial';
 import { useBleScanner } from '../features/useBLEscanner';
+import { useImmersiveMode } from '../hooks/useImmersiveMode';
 import OperateScreen from '../screens/OperateScreen';
 
+// Inter font families (ensure these are loaded in your app)
+const INTER_BLACK = 'Inter-Black';
+const INTER_MEDIUM = 'Inter-Medium';
+const INTER_REGULAR = 'Inter-Regular';
+
 export default function HomeScreen() {
+  // Enable immersive mode
+  useImmersiveMode();
   const {
     devices,
     scanning,
@@ -158,7 +166,8 @@ const styles = StyleSheet.create({
   bleLabel: { 
     color: '#fff', 
     textAlign: 'center', 
-    marginBottom: 18 
+    marginBottom: 18,
+    fontFamily: INTER_BLACK,
   },
 
   bleButton: { 
@@ -179,7 +188,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold', 
     fontSize: 15,
     textAlign: 'center',
-    fontFamily: 'Inter'
+    fontFamily: INTER_BLACK,
   },
   startButton: { 
     backgroundColor: '#44ff75', 
@@ -198,7 +207,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold', 
     fontSize: 15,
     textAlign: 'center',
-    fontFamily: 'Inter'
+    fontFamily: INTER_BLACK,
   },
   scanButton: { 
     backgroundColor: '#352b2eff', 
@@ -217,6 +226,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold', 
     fontSize: 15,
     textAlign: 'center',
-    fontFamily: 'Inter'
+    fontFamily: INTER_BLACK,
   },
 });

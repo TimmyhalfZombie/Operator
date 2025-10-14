@@ -3,6 +3,11 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Device } from 'react-native-ble-plx';
 
+// Inter font families (ensure these are loaded in your app)
+const INTER_BLACK = 'Inter-Black';
+const INTER_MEDIUM = 'Inter-Medium';
+const INTER_REGULAR = 'Inter-Regular';
+
 type Props = {
   device: Device;
   isConnected: boolean;
@@ -59,6 +64,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontWeight: 'bold',
     fontSize: 16,
+    fontFamily: INTER_BLACK,
   },
   connectButton: {
     backgroundColor: '#322F36',
@@ -71,21 +77,25 @@ const styles = StyleSheet.create({
   connectButtonText: {
     color: '#fff',
     fontWeight: '600',
+    fontFamily: INTER_MEDIUM,
   },
   name: {
     color: '#fff',
     fontSize: 18,
     marginTop: 6,
+    fontFamily: INTER_REGULAR,
   },
   id: {
     color: '#aaa',
     fontSize: 13,
     marginVertical: 2,
+    fontFamily: INTER_REGULAR,
   },
   status: {
     fontSize: 12,
     marginBottom: 8,
     fontWeight: 'bold',
+    fontFamily: INTER_BLACK,
   },
   bonded: {
     color: '#22c55e', // green

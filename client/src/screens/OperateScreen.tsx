@@ -3,6 +3,11 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import TemperatureDial from '../components/TemperatureDial';
 import { useBleScanner } from '../features/useBLEscanner';
 
+// Inter font families (ensure these are loaded in your app)
+const INTER_BLACK = 'Inter-Black';
+const INTER_MEDIUM = 'Inter-Medium';
+const INTER_REGULAR = 'Inter-Regular';
+
 type Phase = 'idle' | 'extending' | 'heating' | 'retracting';
 
 export default function OperateScreen() {
@@ -108,7 +113,7 @@ export default function OperateScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F0F0F', alignItems: 'center', paddingTop: 60 },
-  brand: { fontSize: 28, fontWeight: 'bold', marginBottom: 20 },
+  brand: { fontSize: 28, fontWeight: 'bold', marginBottom: 20, fontFamily: INTER_BLACK },
   startBtn: {
     marginTop: 100,
     backgroundColor: '#0F0F0F',
@@ -126,7 +131,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
     letterSpacing: 1,
-    fontFamily: 'Inter',
+    fontFamily: INTER_BLACK,
     textAlign: 'center',
   },
   phaseBtn: {
@@ -136,5 +141,6 @@ const styles = StyleSheet.create({
   phaseTxt: {
     color: '#ffffff',
     fontWeight: 'bold',
+    fontFamily: INTER_BLACK,
   },
 });

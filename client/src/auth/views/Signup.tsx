@@ -1,21 +1,21 @@
+import * as Icons from 'phosphor-react-native';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  SafeAreaView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  ActivityIndicator,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Animated,
-  Easing,
+    ActivityIndicator,
+    Animated,
+    Easing,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import * as Icons from 'phosphor-react-native';
 
 type Values = { username: string; email: string; phone: string; password: string };
 type Props = {

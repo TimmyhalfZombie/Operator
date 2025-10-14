@@ -1,8 +1,9 @@
 import React from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import * as Icons from 'phosphor-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { getAssistById } from '../features/assistance/api';
 
 const BG = '#000000ff';
 const CARD = '#141414';
@@ -14,27 +15,66 @@ const WHITE = '#FFFFFF';
 const RED = '#ff5f5f';
 const BLUE = '#4ea7ff';
 
-export default function ActivityDetailScreen() {
-  // Optional: accept params if you later pass real data
-  const params = useLocalSearchParams<{
-    startName?: string;
-    startAddr?: string;
-    endName?: string;
-    endAddr?: string;
-    customer?: string;
-    timeRange?: string;
-    status?: string;
-    rating?: string; // "0-5"
-  }>();
+type Params = {
+  id?: string;           // ← we’ll navigate with this
+  startName?: string;
+  startAddr?: string;
+  endName?: string;
+  endAddr?: string;
+  customer?: string;
+  timeRange?: string;
+  status?: string;
+  rating?: string;       // "0-5"
+};
 
-  const startName = params.startName || 'Balabago, Pavia';
-  const startAddr = params.startAddr || 'QG6Q+G26, Pavia, Iloilo City, 5001 Iloilo';
-  const endName = params.endName || 'Iloilo Merchant Marine School';
-  const endAddr = params.endAddr || 'QGVM+MQ9, R-3 Rd., Cabugao Sur, Pavia, Iloilo City, 5001 Iloilo';
-  const customer = params.customer || 'Leo John Molina';
-  const timeRange = params.timeRange || '10:15 - 10:25 AM';
-  const status = params.status || 'Repaired';
-  const rating = Math.max(0, Math.min(5, Number(params.rating ?? 4)));
+function fmtRange(a?: string, b?: string) {
+  const dt = (s?: string) => (s ? new Date(s) : null);
+  const toHM = (d: Date) =>
+    d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const A = dt(a), B = dt(b);
+  if (A && B) return `${toHM(A)} - ${toHM(B)}`;
+  if (A) return toHM(A);
+  return undefined;
+}
+
+export default function ActivityDetailScreen() {
+  const p = useLocalSearchParams<Params>();
+  const [loading, setLoading] = React.useState(!!p.id);
+  const [err, setErr] = React.useState('');
+  const [doc, setDoc] = React.useState<any | null>(null);
+
+  React.useEffect(() => {
+    let live = true;
+    if (!p.id) return;
+    (async () => {
+      try {
+        setLoading(true);
+        const d = await getAssistById(p.id!);
+        if (!live) return;
+        setDoc(d);
+      } catch (e: any) {
+        if (live) setErr(e?.message ?? 'Failed to load');
+      } finally {
+        if (live) setLoading(false);
+      }
+    })();
+    return () => { live = false; };
+  }, [p.id]);
+
+  // Prefer DB (doc), fall back to params, then sensible defaults
+  const customer = doc?.clientName ?? p.customer ?? 'Customer';
+  const startName = p.startName || doc?._raw?.origin?.name || 'Start';
+  const startAddr = p.startAddr || doc?._raw?.origin?.address || '';
+  const endName = p.endName || doc?.placeName || 'Destination';
+  const endAddr = p.endAddr || doc?.address || '';
+  const status = (doc?.status || p.status || 'Repaired') as string;
+  const ratingNum = Number(
+    doc?._raw?.rating ?? (doc?.rating as any) ?? p.rating ?? 0
+  );
+  const rating = Math.max(0, Math.min(5, Number.isFinite(ratingNum) ? ratingNum : 0));
+
+  const timeRange =
+    p.timeRange || fmtRange(doc?.createdAt, doc?.updatedAt) || '—';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -45,64 +85,71 @@ export default function ActivityDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 24 }}>
-
-        <Text style={styles.timeText}>{timeRange}</Text>
-        <Text style={styles.statusText}>{status}</Text>
-
-        {/* Customer Card */}
-        <View style={styles.card}>
-          <View style={styles.row}>
-            <View style={styles.avatar} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.customerName}>{customer}</Text>
-            </View>
-            <TouchableOpacity hitSlop={10} style={styles.iconBtn}>
-              <Icons.EnvelopeSimple size={18} color={GREEN_DIM} />
-            </TouchableOpacity>
-          </View>
+      {loading && !doc ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: BG }}>
+          <ActivityIndicator />
         </View>
+      ) : (
+        <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 24 }}>
+          {err ? <Text style={{ color: '#ff9d9d', marginBottom: 8 }}>{err}</Text> : null}
 
-        {/* Route Card */}
-        <View style={styles.card}>
-          <View style={styles.routeRow}>
-            <View style={styles.bulletBlue} />
-            <View style={styles.routeRight}>
-              <Text style={styles.placeName}>{startName}</Text>
-              <Text style={styles.addr}>{startAddr}</Text>
+          <Text style={styles.timeText}>{timeRange}</Text>
+          <Text style={styles.statusText}>{status}</Text>
+
+          {/* Customer Card */}
+          <View style={styles.card}>
+            <View style={styles.row}>
+              <View style={styles.avatar} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.customerName}>{customer}</Text>
+              </View>
+              <TouchableOpacity hitSlop={10} style={styles.iconBtn}>
+                <Icons.EnvelopeSimple size={18} color={GREEN_DIM} />
+              </TouchableOpacity>
             </View>
           </View>
 
-          <View style={styles.routeLine} />
+          {/* Route Card */}
+          <View style={styles.card}>
+            <View style={styles.routeRow}>
+              <View style={styles.bulletBlue} />
+              <View style={styles.routeRight}>
+                <Text style={styles.placeName}>{startName}</Text>
+                <Text style={styles.addr}>{startAddr}</Text>
+              </View>
+            </View>
 
-          <View style={[styles.routeRow, { marginTop: 6 }]}>
-            <View style={styles.bulletRed} />
-            <View style={styles.routeRight}>
-              <Text style={styles.placeName}>{endName}</Text>
-              <Text style={styles.addr}>{endAddr}</Text>
+            <View style={styles.routeLine} />
+
+            <View style={[styles.routeRow, { marginTop: 6 }]}>
+              <View style={styles.bulletRed} />
+              <View style={styles.routeRight}>
+                <Text style={styles.placeName}>{endName}</Text>
+                <Text style={styles.addr}>{endAddr}</Text>
+              </View>
             </View>
           </View>
-        </View>
 
-        {/* Rating Card (read-only for now) */}
-        <View style={styles.card}>
-          <Text style={styles.ratingTitle}>Customer rating</Text>
-          <View style={styles.starsRow}>
-            {Array.from({ length: 5 }).map((_, i) => {
-              const filled = i < rating;
-              return (
-                <Icons.Star
-                  key={i}
-                  size={22}
-                  weight={filled ? 'fill' : 'regular'}
-                  color={filled ? GREEN : '#6b6b6b'}
-                  style={{ marginHorizontal: 4 }}
-                />
-              );
-            })}
+          {/* Rating Card (read-only) */}
+          <View style={styles.card}>
+            <Text style={styles.ratingTitle}>Customer rating</Text>
+            <View style={styles.starsRow}>
+              {Array.from({ length: 5 }).map((_, i) => {
+                const filled = i < rating;
+                return (
+                  <Icons.Star
+                    key={i}
+                    size={22}
+                    weight={filled ? 'fill' : 'regular'}
+                    color={filled ? GREEN : '#6b6b6b'}
+                    style={{ marginHorizontal: 4 }}
+                  />
+                );
+              })}
+            </View>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }

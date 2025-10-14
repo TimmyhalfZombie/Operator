@@ -90,6 +90,7 @@ module.exports = ({ config }) => ({
       backgroundColor: '#000000',
       barStyle: 'dark-content',
     },
+    softwareKeyboardLayoutMode: 'pan',
   },
 
   // ❌ Removed the "web" block entirely

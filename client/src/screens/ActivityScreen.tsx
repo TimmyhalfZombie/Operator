@@ -1,16 +1,16 @@
+import { router } from 'expo-router';
 import * as Icons from 'phosphor-react-native';
 import React, { useMemo } from 'react';
 import {
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useActivity } from '../features/useActivity';
-import { router } from 'expo-router';
+import { useImmersiveMode } from '../hooks/useImmersiveMode';
 
 const BG = '#121212';
 const TEXT = '#EDEDED';
@@ -26,7 +26,6 @@ type ActivityItemProps = {
   title: string;
   subtitle?: string;
   isNew?: boolean;
-  showRate?: boolean;
   onPress?: () => void;
 };
 
@@ -34,7 +33,6 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
   title,
   subtitle,
   isNew,
-  showRate,
   onPress,
 }) => {
   const Content = (
@@ -47,11 +45,6 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
           {isNew && <Text style={styles.badgeNew}>Request assistance</Text>}
           <Text numberOfLines={1} style={styles.itemTitle}>{title}</Text>
           {!!subtitle && <Text style={styles.itemSubtitle}>{subtitle}</Text>}
-          {showRate && (
-            <View style={{ paddingVertical: 4 }}>
-              <Text style={styles.rateText}>Rate  →</Text>
-            </View>
-          )}
         </View>
       </View>
       <View style={styles.itemRight}>
@@ -88,7 +81,10 @@ function formatWhen(dt: string | Date) {
 }
 
 const ActivityScreen: React.FC = () => {
-  const { newItems, recentItems, loading, error, refresh } = useActivity();
+  // Enable immersive mode
+  useImmersiveMode();
+  
+  const { newItems, recentItems, loading, error } = useActivity();
 
   const empty = useMemo(
     () => !loading && !error && newItems.length === 0 && recentItems.length === 0,
@@ -105,9 +101,6 @@ const ActivityScreen: React.FC = () => {
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl tintColor={GREEN} refreshing={loading} onRefresh={refresh} />
-        }
       >
         {error ? (
           <View style={{ padding: 16 }}>
@@ -148,9 +141,19 @@ const ActivityScreen: React.FC = () => {
             <Text style={styles.sectionTitle}>Recent</Text>
             <View style={styles.card}>
               {recentItems.map((it, idx) => {
-                const title =
-                  it?.location?.address || it?.vehicle?.model || 'Assistance request';
-                const showRate = String(it.status).toLowerCase() === 'completed';
+                // Client information from database fields
+                const clientName = it?.clientName || 
+                                 it?.customerName || 
+                                 it?.location?.contactName || 
+                                 it?.location?.contact?.name || 
+                                 it?.contactName || 
+                                 it?.user?.name || 
+                                 'Client';
+                const clientLocation = it?.location?.address || it?.destination?.address || 'Location';
+                const date = formatWhen(it.createdAt);
+                
+                const title = clientName;
+                const subtitle = `${clientLocation} • ${date}`;
 
                 // Client location from Mongo: coordinates = [lng, lat]
                 const clientLng = it?.location?.coordinates?.[0];
@@ -179,8 +182,7 @@ const ActivityScreen: React.FC = () => {
                   <React.Fragment key={it.id}>
                     <ActivityItem
                       title={title}
-                      subtitle={formatWhen(it.createdAt)}
-                      showRate={showRate}
+                      subtitle={subtitle}
                       onPress={onPress}
                     />
                     {idx < recentItems.length - 1 && <View style={styles.divider} />}
@@ -249,28 +251,23 @@ const styles = StyleSheet.create({
     color: GREEN, 
     fontSize: 15, 
     marginBottom: 2,
-     fontFamily: INTER_BLACK 
-    },
+    fontFamily: INTER_BLACK,
+  },
 
   itemTitle: { 
     color: TEXT, 
     fontSize: 16, 
-    fontFamily: INTER_BLACK 
+    fontFamily: INTER_BLACK,
   },
 
   itemSubtitle: {
     color: SUBTEXT, 
-    fontSize: 12, 
+    fontSize: 13, 
     marginTop: 2, 
-    fontFamily: INTER_MEDIUM 
+    fontFamily: INTER_BLACK,
+    fontWeight: 'bold',
   },
 
-  rateText: {
-     marginTop: 6, 
-     color: '#CDEEDA', 
-     fontSize: 12, 
-     fontFamily: INTER_BLACK
-     },
 
   itemRight: { width: 28, alignItems: 'flex-end' },
   newDot: { width: 10, height: 10, borderRadius: 6, backgroundColor: GREEN },

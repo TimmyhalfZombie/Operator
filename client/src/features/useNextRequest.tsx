@@ -1,25 +1,73 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { AssistanceRequest } from './assistance/types';
 import { acceptAssist, declineAssist, fetchNextAssist } from './assistance/api';
+
+const ACTIVE_MS = 10_000;     // poll every 10s in foreground
+const BACKGROUND_MS = 30_000; // poll every 30s in background
 
 export function useNextAssist() {
   const [data, setData] = useState<AssistanceRequest | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appActiveRef = useRef(true);
+  const runningRef = useRef(false);
+
+  const load = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
     try {
-      const item = await fetchNextAssist(); // already normalized
+      const item = await fetchNextAssist();
       setData(item ?? null);
+      if (!silent) setError('');
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load');
-      setData(null);
+      if (!silent) setError(e?.message ?? 'Failed to load');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
+
+  // simple recursive timeout (more reliable than setInterval in RN)
+  const schedule = useCallback((ms: number) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async function tick() {
+      if (runningRef.current) return schedule(ms); // skip overlapping runs
+      runningRef.current = true;
+      try {
+        await load(true); // silent refresh
+      } finally {
+        runningRef.current = false;
+        timerRef.current = setTimeout(tick, ms);
+      }
+    }, ms);
+  }, [load]);
+
+  useEffect(() => {
+    // initial load + start polling
+    load(false);
+    schedule(ACTIVE_MS);
+
+    const sub = AppState.addEventListener('change', (s) => {
+      const active = s === 'active';
+      appActiveRef.current = active;
+      // refresh immediately when user returns
+      if (active) {
+        load(true);
+        schedule(ACTIVE_MS);
+      } else {
+        schedule(BACKGROUND_MS);
+      }
+    });
+
+    return () => {
+      sub.remove();
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [load, schedule]);
 
   const accept = useCallback(
     async (explicitId?: string) => {
@@ -34,8 +82,7 @@ export function useNextAssist() {
         }
         throw e;
       } finally {
-        // Pull next request regardless of outcome
-        await load();
+        await load(true);
       }
     },
     [data?.id, load]
@@ -48,15 +95,11 @@ export function useNextAssist() {
       try {
         await declineAssist(id);
       } finally {
-        await load();
+        await load(true);
       }
     },
     [data?.id, load]
   );
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { data, loading, error, reload: load, accept, decline };
+  return { data, loading, error, reload: () => load(false), accept, decline };
 }

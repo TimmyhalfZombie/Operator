@@ -9,6 +9,11 @@ export type AssistItem = {
   updatedAt?: string;
   assignedTo?: string | null;
   userId?: string | null;
+  // Client name fields from database
+  clientName?: string;
+  customerName?: string;
+  contactName?: string;
+  user?: { name?: string };
 };
 
 /** Operator inbox: everyone’s requests */
