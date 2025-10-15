@@ -1,12 +1,14 @@
+// client/src/features/useAcceptedJobUI.tsx
 import { router } from 'expo-router';
 import React from 'react';
 import { Alert, View } from 'react-native';
 import AcceptedRequestCard from '../components/AcceptedRequestCard';
-import { completeAssist } from '../features/assistance/api';
+import { completeAssist, getAssistById } from '../features/assistance/api';
 import type { AssistanceRequest } from '../features/assistance/types';
+import { saveCompleted } from '../lib/completedCache';
 
 export type AcceptedJob = {
-  id: string;                 // <-- keep the request id so we can complete it
+  id: string;
   clientName: string;
   placeName: string;
   address: string;
@@ -57,20 +59,40 @@ export default function useAcceptedJobUI(defaultBottomOffset = 12) {
     try {
       if (!state.job) return;
       const j = state.job;
-
-      // Close the card immediately to prevent first screen flash
       close();
 
-      // 1) tell the server this request is complete; get details back
+      // 1) Mark complete
       const completed = await completeAssist(j.id);
+      const detailId = completed?.id || j.id;
 
-      // 2) go to the detail screen using expo-router
-      router.push({
-        pathname: '/activity-detail',
-        params: {
-          id: completed.id || j.id, // Only pass id - let ActivityDetailScreen fetch fresh data
-        },
-      });
+      // 2) Fetch the finalized document and cache it for later reads
+      try {
+        const fresh = await getAssistById(detailId);
+        await saveCompleted({
+          id: fresh.id,
+          status: fresh.status,
+          clientName: fresh.clientName,
+          customerName: (fresh as any)?.customerName,
+          customerPhone: (fresh as any)?.customerPhone,
+          phone: fresh.phone,
+          placeName: fresh.placeName,
+          address: fresh.address,
+          vehicle: fresh.vehicle ?? (fresh.vehicleType ? { model: fresh.vehicleType, plate: fresh.plateNumber } : undefined),
+          vehicleType: fresh.vehicleType,
+          plateNumber: fresh.plateNumber,
+          otherInfo: fresh.otherInfo,
+          location: (fresh as any)?.location,
+          createdAt: fresh.createdAt,
+          updatedAt: fresh.updatedAt,
+          completedAt: (fresh as any)?.completedAt,
+          operator: (fresh as any)?.operator,
+          rating: (fresh as any)?.rating ?? (fresh as any)?._raw?.rating ?? null,
+          _raw: (fresh as any)?._raw,
+        });
+      } catch {}
+
+      // 3) Navigate to the same detail screen, which can now fall back to cache
+      router.push(`/activity-detail?id=${encodeURIComponent(String(detailId))}`);
 
       j.onRepaired?.();
     } catch (e: any) {
@@ -93,7 +115,7 @@ export default function useAcceptedJobUI(defaultBottomOffset = 12) {
           phone={state.job.phone}
           otherInfo={state.job.otherInfo}
           onMessage={() => {}}
-          onRepaired={handleRepaired}                     // <-- calls server + navigates
+          onRepaired={handleRepaired}
           onCancelPress={() => {
             state.job?.onCancel?.();
             close();

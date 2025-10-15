@@ -169,7 +169,7 @@ export default function LoginView({ values, onChange, onSignIn, onSignUp, onForg
       <View style={styles.header}>
         <Text style={styles.brandRow}>
           <Text style={{ color: GREEN, fontWeight: 'normal', fontFamily: 'Candal' }}>patch</Text>
-          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up.</Text>
+          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up</Text>
         </Text>
         <Text style={styles.subTitle}>Welcome Back!</Text>
       </View>

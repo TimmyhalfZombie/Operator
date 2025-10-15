@@ -32,7 +32,7 @@ function normalize(raw: any): AssistanceRequest {
     createdAt: raw?.createdAt,
     updatedAt: raw?.updatedAt,
 
-    // Preserve the original location object for ActivityScreen
+    // Preserve full objects for consumers that need them
     location: raw?.location,
     vehicle: raw?.vehicle,
 
@@ -43,11 +43,8 @@ function normalize(raw: any): AssistanceRequest {
 /** Get newest pending request for the operator. */
 export async function fetchNextAssist(): Promise<AssistanceRequest | null> {
   const res = await api('/api/assist/next', { method: 'GET', auth: true });
-
-  // Accept both shapes: { ok, data } or raw object
   const body = (res && (res as any).data !== undefined ? (res as any).data : res) as any;
   const raw = body && body.data !== undefined ? body.data : body;
-
   if (!raw) return null;
   return normalize(raw);
 }
@@ -70,12 +67,11 @@ export async function declineAssist(id: string): Promise<void> {
   await api(`/api/assist/${id}/decline`, { method: 'POST', auth: true });
 }
 
-/** List requests for Activity (e.g., pending inbox). */
+/** List requests for Activity (recent/inbox feed). */
 export async function fetchAssistInbox(params: { status?: string; limit?: number } = {}) {
   const q = new URLSearchParams();
   if (params.status) q.set('status', params.status);
   if (params.limit) q.set('limit', String(params.limit));
-
   const res = await api(`/api/assist/inbox?${q.toString()}`, { method: 'GET', auth: true });
   const items = (res?.items ?? res?.data?.items ?? []) as any[];
   return items.map(normalize);
@@ -83,8 +79,7 @@ export async function fetchAssistInbox(params: { status?: string; limit?: number
 
 /**
  * Mark a request as completed (used when operator taps "Repaired").
- * If the server replies 404 (e.g., a second quick tap, or already completed),
- * we treat it as "already completed" and return a minimal payload so the UI can continue.
+ * If the server replies 404 (already completed), return minimal payload so UI can proceed.
  */
 export async function completeAssist(
   id: string,
@@ -117,7 +112,6 @@ export async function completeAssist(
     const status = e?.status ?? 0;
     const msg = String(e?.message || '');
     if (status === 404 && /not\s*found/i.test(msg)) {
-      // Treat as already-completed and let the caller proceed.
       return { id, status: 'completed' };
     }
     throw e;
@@ -129,4 +123,88 @@ export async function getAssistById(id: string): Promise<AssistanceRequest> {
   const res = await api(`/api/assist/${id}`, { method: 'GET', auth: true });
   const raw = (res?.data ?? res) as any;
   return normalize(raw);
+}
+
+/** Optional: Try to fetch an "activity" by id using common endpoints (if your server exposes them). */
+export async function getActivityById(id: string): Promise<any | null> {
+  const paths = [
+    `/api/activities/${id}`,
+    `/api/activity/${id}`,
+    `/api/assist/activity/${id}`,
+  ];
+
+  for (const p of paths) {
+    try {
+      const res = await api(p, { method: 'GET', auth: true });
+      const data = (res?.data ?? res) as any;
+      if (data) return data;
+    } catch (e: any) {
+      const status = e?.status ?? e?.response?.status;
+      if (status === 404) continue;
+      throw e;
+    }
+  }
+  return null;
+}
+
+/** FINAL fallback: scan inbox for a matching id in any common field (including _raw). */
+async function findAssistInInboxByAnyId(anyId: string): Promise<AssistanceRequest | null> {
+  const items = await fetchAssistInbox({ limit: 200 }).catch(() => []);
+  const target = String(anyId).toLowerCase();
+
+  const normalizeCands = (vals: any[]) =>
+    vals.filter(Boolean).map((x: any) => String(x).toLowerCase());
+
+  const hasMatch = (it: any) => {
+    const r = it?._raw ?? {};
+    const cands = normalizeCands([
+      // normalized fields
+      it?.id, it?._id, it?.requestId, it?.assistId, it?.assistanceId,
+      it?.request?.id, it?.request?._id,
+      // raw fields (server may only include on raw)
+      r?.id, r?._id, r?.requestId, r?.assistId, r?.assistanceId,
+      r?.request?.id, r?.request?._id,
+      r?.activityId, r?.activity?.id,
+    ]);
+    return cands.includes(target);
+  };
+
+  const hit = (items as any[]).find(hasMatch);
+  return hit || null;
+}
+
+/**
+ * Resolve either a request id or an activity id into the request document.
+ * 1) Try the id as a request id
+ * 2) Try activity endpoints and extract request id
+ * 3) Scan inbox for any matching id in normalized or _raw shapes
+ */
+export async function getAssistByAnyId(anyId: string): Promise<AssistanceRequest | null> {
+  try {
+    const req = await getAssistById(anyId);
+    if (req) return req;
+  } catch {
+    // not a direct request id — continue
+  }
+
+  const act = await getActivityById(anyId);
+  const reqId =
+    act?.requestId ??
+    act?.assistId ??
+    act?.assistanceId ??
+    act?.request?.id ??
+    act?.request?._id ??
+    null;
+
+  if (reqId) {
+    try {
+      return await getAssistById(String(reqId));
+    } catch {
+      // fall through to inbox
+    }
+  }
+
+  // last resort
+  const viaInbox = await findAssistInInboxByAnyId(anyId);
+  return viaInbox;
 }

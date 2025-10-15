@@ -1,15 +1,14 @@
 // server/src/app.ts
-import express from 'express';
 import cors from 'cors';
-import morgan from 'morgan';
+import express from 'express';
 import { config } from './config';
 import { connectDB } from './db/connect';
 
-import authRoutes from './routes/auth';
-import usersRoutes from './routes/users';
 import assistRoutes from './routes/assist';
-import geoRoutes from './routes/geo';          // routing & places proxy
+import authRoutes from './routes/auth';
+import geoRoutes from './routes/geo'; // routing & places proxy
 import operatorRoutes from './routes/operator'; // NEW: exposes /api/users/me/location
+import usersRoutes from './routes/users';
 
 const app = express();
 
@@ -21,7 +20,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(morgan('dev'));
+// app.use(morgan('dev')); // Disabled to reduce log spam
 
 /* ---------- health ---------- */
 app.get('/health', (_req, res) => res.json({ ok: true }));

@@ -3,13 +3,18 @@ import { AppState } from 'react-native';
 import { useDeclinedRequests } from '../contexts/DeclinedRequestsContext';
 import { AssistItem, fetchOperatorInbox } from '../lib/activity.api';
 
+const ACTIVE_MS = 500;        // poll every 0.5s in foreground
+const BACKGROUND_MS = 1_000;  // poll every 1s in background
+
 export function useActivity() {
   const [items, setItems] = useState<AssistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const { declinedIds, markAsDeclined } = useDeclinedRequests();
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appActiveRef = useRef(true);
+  const runningRef = useRef(false);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) {
@@ -30,29 +35,43 @@ export function useActivity() {
     }
   }, []);
 
-  useEffect(() => {
-    // Initial load
-    load(false);
-    
-    // Start polling every 500ms for instant updates
-    intervalRef.current = setInterval(() => {
-      load(true);
-    }, 500);
+  // simple recursive timeout (more reliable than setInterval in RN)
+  const schedule = useCallback((ms: number) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async function tick() {
+      if (runningRef.current) return schedule(ms); // skip overlapping runs
+      runningRef.current = true;
+      try {
+        await load(true); // silent refresh
+      } finally {
+        runningRef.current = false;
+        timerRef.current = setTimeout(tick, ms);
+      }
+    }, ms);
+  }, [load]);
 
-    // Handle app state changes
-    const sub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
+  useEffect(() => {
+    // initial load + start polling
+    load(false);
+    schedule(ACTIVE_MS);
+
+    const sub = AppState.addEventListener('change', (s) => {
+      const active = s === 'active';
+      appActiveRef.current = active;
+      // refresh immediately when user returns
+      if (active) {
         load(true);
+        schedule(ACTIVE_MS);
+      } else {
+        schedule(BACKGROUND_MS);
       }
     });
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
       sub.remove();
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [load]);
+  }, [load, schedule]);
 
 
   // Split into "New" (pending) vs "Recent" (non-pending)
@@ -71,5 +90,5 @@ export function useActivity() {
     ), [items, declinedIds]
   );
 
-  return { items, newItems, recentItems, loading, error, markAsDeclined };
+  return { items, newItems, recentItems, loading, error, markAsDeclined, reload: () => load(false) };
 }

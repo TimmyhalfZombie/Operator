@@ -1,14 +1,14 @@
+// client/src/screens/ActivityDetailScreen.tsx
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Icons from 'phosphor-react-native';
 import React from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getAssistById } from '../features/assistance/api';
+import { getAssistByAnyId } from '../features/assistance/api';
+import { getCompletedByAnyId } from '../lib/completedCache';
 
-// Inter font families (ensure these are loaded in your app)
 const INTER_BLACK = 'Inter-Black';
 const INTER_MEDIUM = 'Inter-Medium';
-const INTER_REGULAR = 'Inter-Regular';
 
 const BG = '#000000ff';
 const CARD = '#141414';
@@ -21,7 +21,8 @@ const RED = '#ff5f5f';
 const BLUE = '#4ea7ff';
 
 type Params = {
-  id?: string;           // ← we’ll navigate with this
+  id?: string | string[];
+  activityId?: string | string[];
   startName?: string;
   startAddr?: string;
   endName?: string;
@@ -29,101 +30,201 @@ type Params = {
   customer?: string;
   timeRange?: string;
   status?: string;
-  rating?: string;       // "0-5"
+  rating?: string;
 };
 
 function fmtRange(a?: string, b?: string) {
   const dt = (s?: string) => (s ? new Date(s) : null);
-  const toHM = (d: Date) =>
-    d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const toHM = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const A = dt(a), B = dt(b);
   if (A && B) return `${toHM(A)} - ${toHM(B)}`;
   if (A) return toHM(A);
   return undefined;
 }
 
+const first = (v?: string | string[]) => (Array.isArray(v) ? v[0] : v);
+
 export default function ActivityDetailScreen() {
   const p = useLocalSearchParams<Params>();
-  const [loading, setLoading] = React.useState(!!p.id);
+
+  const assistId = first(p.id);
+  const actId = first(p.activityId);
+  const requestId = assistId ?? actId;
+
+  const [loading, setLoading] = React.useState(!!requestId);
   const [err, setErr] = React.useState('');
   const [doc, setDoc] = React.useState<any | null>(null);
 
-  React.useEffect(() => {
-    let live = true;
-    if (!p.id) return;
-    (async () => {
-      try {
-        setLoading(true);
-        const d = await getAssistById(p.id!);
-        if (!live) return;
-        setDoc(d);
-      } catch (e: any) {
-        if (live) setErr(e?.message ?? 'Failed to load');
-      } finally {
-        if (live) setLoading(false);
-      }
-    })();
-    return () => { live = false; };
-  }, [p.id]);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runningRef = React.useRef(false);
 
-  // Only calculate data when doc exists to prevent fallback flash
+  const loadData = React.useCallback(async (silent = false) => {
+    if (!requestId) {
+      setErr('No request ID provided');
+      setLoading(false);
+      return;
+    }
+
+    if (runningRef.current) return; // skip overlapping runs
+    runningRef.current = true;
+
+    try {
+      if (!silent) {
+        setLoading(true);
+        setErr('');
+      }
+      const id = String(requestId);
+
+      // 1) Try cache first for instant UI (only on first load)
+      if (!silent) {
+        try {
+          const cached = await getCompletedByAnyId(id);
+          if (cached) {
+            setDoc({
+              ...cached,
+              clientName: cached.clientName ?? cached.customerName ?? 'Customer',
+              vehicle: cached.vehicle ?? (cached.vehicleType ? { model: cached.vehicleType, plate: cached.plateNumber } : undefined),
+              address: cached.address ?? cached.location?.address,
+            });
+          }
+        } catch {}
+      }
+
+      // 2) Then try server (refresh)
+      let fresh: any | null = null;
+      try {
+        fresh = await getAssistByAnyId(id);
+      } catch {
+        fresh = null;
+      }
+
+      if (fresh) {
+        setDoc(fresh);             // overwrite cache version with authoritative server doc
+        setErr('');
+      } else if (!doc && !silent) {
+        // only show error if we also missed the cache
+        if (!await getCompletedByAnyId(id)) {
+          setErr('No data returned for this item.');
+        }
+      }
+    } catch (e: any) {
+      if (!silent) setErr(`Error: ${e?.message ?? 'Failed to load'}`);
+    } finally {
+      if (!silent) setLoading(false);
+      runningRef.current = false;
+    }
+  }, [requestId, doc]);
+
+  // Auto-refresh polling
+  const schedule = React.useCallback((ms: number) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async function tick() {
+      if (runningRef.current) return schedule(ms); // skip overlapping runs
+      try {
+        await loadData(true); // silent refresh
+      } finally {
+        timerRef.current = setTimeout(tick, ms);
+      }
+    }, ms);
+  }, [loadData]);
+
+  React.useEffect(() => {
+    // Initial load
+    loadData(false);
+    
+    // Start polling every 0.5 seconds
+    schedule(500);
+
+    const sub = AppState.addEventListener('change', (s) => {
+      const active = s === 'active';
+      // refresh immediately when user returns
+      if (active) {
+        loadData(true);
+        schedule(500);
+      } else {
+        schedule(1_000); // 1 second polling in background
+      }
+    });
+
+    return () => {
+      sub.remove();
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [loadData, schedule]);
+
+  // ---- render prep
   let customer: string = 'Customer', contactName: string | null = null, customerPhone: string | null = null, startName: string = 'Start', startAddr: string = '', endName: string = 'Vehicle', endAddr: string = 'Location', status: string = 'Repaired', timeRepaired: string | null = null, rating: number = 0, timeRange: string = '—';
   
   if (doc) {
-    // Prefer DB (doc), fall back to params, then sensible defaults
-    customer = doc?.clientName ?? doc?.customerName ?? p.customer ?? 'Customer';
+    customer = doc?.clientName ?? (p as any).customer ?? 'Customer';
     contactName = doc?.contactName || null;
-    customerPhone = doc?.customerPhone || null;
-    
-    // Use operator information based on request status
+    customerPhone = doc?.customerPhone || doc?.phone || null;
+
+    // Operator info → start
     startName = 'Start';
     startAddr = '';
+
+    // Always try to get operator location from database
+    const operatorLocation = doc?.operator?.initial_address || 
+                            doc?.operator?.location || 
+                            doc?._raw?.operator?.initial_address ||
+                            doc?._raw?.operator?.location ||
+                            'Location unknown';
+    const requestReceivedTime = doc?.createdAt ? new Date(doc.createdAt).toLocaleString() : 'Unknown time';
     
+    // Debug: Log the operator data to see what we're getting
+    console.log('Full doc data:', doc);
+    console.log('Operator data:', doc?.operator);
+    console.log('Raw operator data:', doc?._raw?.operator);
+    console.log('Operator initial_address:', doc?.operator?.initial_address);
+    console.log('Operator location:', doc?.operator?.location);
+    console.log('Raw initial_address:', doc?._raw?.operator?.initial_address);
+    console.log('Raw location:', doc?._raw?.operator?.location);
+    console.log('Final operator location:', operatorLocation);
+    console.log('Request received time:', requestReceivedTime);
+
     if (doc?.operator) {
       const operatorName = doc.operator.name || 'Operator';
-      const operatorLocation = doc.operator.location || 'Location unknown';
       const operatorLastSeen = doc.operator.lastSeen ? new Date(doc.operator.lastSeen).toLocaleString() : 'Unknown time';
       const operatorAcceptedAt = doc.operator.acceptedAt ? new Date(doc.operator.acceptedAt).toLocaleString() : null;
-      
+
       if (doc.status === 'completed') {
-        // For completed requests, show the operator who completed it
         startName = `${operatorName} - ${operatorLocation}`;
         startAddr = `Completed at: ${operatorLastSeen}`;
       } else if (doc.status === 'accepted') {
-        // For accepted requests, show the operator location and acceptance time
         startName = `${operatorName} - ${operatorLocation}`;
         startAddr = operatorAcceptedAt ? `Accepted at: ${operatorAcceptedAt}` : `Last seen: ${operatorLastSeen}`;
       } else {
-        // For other statuses, show the assigned operator
         startName = `${operatorName} - ${operatorLocation}`;
         startAddr = `Last seen: ${operatorLastSeen}`;
       }
     } else {
-      // For pending requests or when no operator is assigned
-      startName = 'Start';
-      startAddr = 'Waiting for operator assignment';
+      // Show operator location from database
+      // Format the operator location display
+      if (operatorLocation && operatorLocation !== 'Location unknown') {
+        startName = operatorLocation;
+      } else {
+        startName = 'Location Unknown';
+      }
+      startAddr = requestReceivedTime;
     }
-    // Update destination to show vehicle model and client location
-    const vehicleModel = doc?.vehicle?.model || 'Vehicle';
+
+    const vehicleModel = doc?.vehicle?.model || doc?.vehicleType || 'Vehicle';
     const clientLocation = doc?.location?.address || doc?.address || 'Location';
     endName = `${vehicleModel}`;
     endAddr = `${clientLocation}`;
-    
-    status = (doc?.status || p.status || 'Repaired') as string;
-    
-    // Get time repaired for completed requests
+
+    status = (doc?.status || (p as any).status || 'Repaired') as string;
     timeRepaired = doc?.completedAt ? new Date(doc.completedAt).toLocaleString() : null;
-    const ratingNum = Number(
-      doc?._raw?.rating ?? (doc?.rating as any) ?? p.rating ?? 0
-    );
+
+    const ratingNum = Number(doc?._raw?.rating ?? (doc?.rating as any) ?? (p as any).rating ?? 0);
     rating = Math.max(0, Math.min(5, Number.isFinite(ratingNum) ? ratingNum : 0));
 
-    timeRange = p.timeRange || fmtRange(doc?.createdAt, doc?.updatedAt) || '—';
+    timeRange = (p as any).timeRange || fmtRange(doc?.createdAt, doc?.updatedAt) || '—';
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      {/* Top bar */}
       <View style={styles.topbar}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={{ padding: 8 }}>
           <Icons.ArrowLeft size={22} color="#0E0E0E" weight="bold" />
@@ -136,12 +237,10 @@ export default function ActivityDetailScreen() {
         </View>
       ) : doc ? (
         <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 24 }}>
-          {err ? <Text style={{ color: '#ff9d9d', marginBottom: 8 }}>{err}</Text> : null}
+          {err ? <Text style={{ color: '#ff9d9d', marginBottom: 8, fontFamily: INTER_MEDIUM }}>{err}</Text> : null}
 
           <Text style={styles.timeText}>{timeRange}</Text>
-          {timeRepaired && (
-            <Text style={styles.timeRepairedText}>Repaired at: {timeRepaired}</Text>
-          )}
+          {timeRepaired && <Text style={styles.timeRepairedText}>Repaired at: {timeRepaired}</Text>}
           <Text style={styles.statusText}>{status}</Text>
 
           {/* Customer Card */}
@@ -150,12 +249,8 @@ export default function ActivityDetailScreen() {
               <View style={styles.avatar} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.customerName}>{customer}</Text>
-                {contactName && (
-                  <Text style={styles.customerContact}>Contact: {contactName}</Text>
-                )}
-                {customerPhone && (
-                  <Text style={styles.customerPhone}>Phone: {customerPhone}</Text>
-                )}
+                {contactName && <Text style={styles.customerContact}>Contact: {contactName}</Text>}
+                {customerPhone && <Text style={styles.customerPhone}>Phone: {customerPhone}</Text>}
               </View>
               <TouchableOpacity hitSlop={10} style={styles.iconBtn}>
                 <Icons.EnvelopeSimple size={22} color={GREEN_DIM} weight="bold" />
@@ -184,7 +279,7 @@ export default function ActivityDetailScreen() {
             </View>
           </View>
 
-          {/* Rating Card (read-only) */}
+          {/* Rating Card */}
           <View style={styles.card}>
             <Text style={styles.ratingTitle}>Customer rating</Text>
             <View style={styles.starsRow}>
@@ -205,7 +300,7 @@ export default function ActivityDetailScreen() {
         </ScrollView>
       ) : (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: BG }}>
-          <Text style={{ color: '#ff9d9d' }}>No data available</Text>
+          <Text style={{ color: '#ff9d9d', fontFamily: INTER_MEDIUM }}>{err || 'No data available'}</Text>
         </View>
       )}
     </SafeAreaView>
@@ -224,131 +319,24 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 8,
   },
   scroll: { paddingHorizontal: 14, paddingTop: 12 },
-  timeText: { 
-    color: WHITE, 
-    opacity: 0.85, 
-    fontSize: 13, 
-    marginBottom: 2,
-    fontFamily: INTER_BLACK,
-  },
-  statusText: { 
-    color: GREEN, 
-    fontSize: 18, 
-    marginBottom: 12,
-    fontFamily: INTER_BLACK,
-  },
-  timeRepairedText: {
-    color: '#B0B0B0',
-    fontSize: 14,
-    marginBottom: 8,
-    fontFamily: INTER_MEDIUM,
-  },
-
-  card: {
-    backgroundColor: CARD,
-    borderColor: BORDER,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 18,
-    marginVertical: 10,
-    minHeight: 80,
-  },
-
-  routeCard: {
-    backgroundColor: CARD,
-    borderColor: BORDER,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 18,
-    marginVertical: 10,
-    minHeight: 450,
-  },
-
+  timeText: { color: WHITE, opacity: 0.85, fontSize: 13, marginBottom: 2, fontFamily: INTER_BLACK },
+  statusText: { color: GREEN, fontSize: 18, marginBottom: 12, fontFamily: INTER_BLACK },
+  timeRepairedText: { color: '#B0B0B0', fontSize: 14, marginBottom: 8, fontFamily: INTER_MEDIUM },
+  card: { backgroundColor: CARD, borderColor: BORDER, borderWidth: 1, borderRadius: 12, padding: 18, marginVertical: 10, minHeight: 80 },
+  routeCard: { backgroundColor: CARD, borderColor: BORDER, borderWidth: 1, borderRadius: 12, padding: 18, marginVertical: 10, minHeight: 450 },
   row: { flexDirection: 'row', alignItems: 'center' },
-  avatar: {
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: '#d9d9d9', marginRight: 12,
-  },
-  customerName: { 
-    color: WHITE, 
-    fontWeight: '700',
-    fontFamily: INTER_BLACK,
-    fontSize: 16,
-    marginBottom: 4,
-  },
-  customerContact: {
-    color: '#B0B0B0',
-    fontSize: 14,
-    fontFamily: INTER_MEDIUM,
-    marginBottom: 2,
-  },
-  customerPhone: {
-    color: '#B0B0B0',
-    fontSize: 14,
-    fontFamily: INTER_MEDIUM,
-  },
-  iconBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: BORDER,
-  },
-
-  routeRow: { 
-    flexDirection: 'row', 
-    alignItems: 'flex-start',
-    paddingVertical: 12,
-    minHeight: 60,
-  },
-  routeRight: { 
-    flex: 1, 
-    marginLeft: 16,
-    justifyContent: 'center',
-    paddingVertical: 4,
-  },
-  bulletBlue: { 
-    width: 14, 
-    height: 14, 
-    borderRadius: 7, 
-    backgroundColor: BLUE, 
-    marginTop: 8,
-    marginRight: 6,
-  },
-  bulletRed: { 
-    width: 14, 
-    height: 14, 
-    borderRadius: 7, 
-    backgroundColor: RED, 
-    marginTop: 8,
-    marginRight: 6,
-  },
-  routeLine: {
-    height: 240, 
-    width: 3, 
-    backgroundColor: BORDER,
-    marginLeft: 6, 
-    marginVertical: 6,
-  },
-  placeName: { 
-    color: WHITE, 
-    fontWeight: '800',
-    fontFamily: INTER_BLACK,
-    fontSize: 18,
-    marginBottom: 6,
-  },
-  addr: { 
-    color: SUB, 
-    fontSize: 14, 
-    marginTop: 4,
-    fontFamily: INTER_MEDIUM,
-    lineHeight: 20,
-  },
-
-  ratingTitle: { 
-    color: WHITE, 
-    opacity: 0.9, 
-    marginBottom: 10, 
-    textAlign: 'center',
-    fontFamily: INTER_MEDIUM,
-  },
+  avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#d9d9d9', marginRight: 12 },
+  customerName: { color: WHITE, fontFamily: INTER_BLACK, fontSize: 20, marginBottom: 4 },
+  customerContact: { color: '#B0B0B0', fontSize: 14, fontFamily: INTER_MEDIUM, marginBottom: 2 },
+  customerPhone: { color: '#B0B0B0', fontSize: 14, fontFamily: INTER_MEDIUM },
+  iconBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
+  routeRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 12, minHeight: 60 },
+  routeRight: { flex: 1, marginLeft: 16, justifyContent: 'center', paddingVertical: 4 },
+  bulletBlue: { width: 14, height: 14, borderRadius: 7, backgroundColor: BLUE, marginTop: 8, marginRight: 6 },
+  bulletRed: { width: 14, height: 14, borderRadius: 7, backgroundColor: RED, marginTop: 8, marginRight: 6 },
+  routeLine: { height: 240, width: 3, backgroundColor: BORDER, marginLeft: 6, marginVertical: 6 },
+  placeName: { color: WHITE, fontWeight: '800', fontFamily: INTER_BLACK, fontSize: 18, marginBottom: 6 },
+  addr: { color: SUB, fontSize: 14, marginTop: 4, fontFamily: INTER_MEDIUM, lineHeight: 20 },
+  ratingTitle: { color: WHITE, opacity: 0.9, marginBottom: 10, textAlign: 'center', fontFamily: INTER_MEDIUM },
   starsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 });

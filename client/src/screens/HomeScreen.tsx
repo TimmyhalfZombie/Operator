@@ -73,7 +73,7 @@ export default function HomeScreen() {
       <View style={{ width: '100%', alignItems: 'flex-start', paddingHorizontal: 24 }}>
         <Text style={styles.title}>
           <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal' }}>patch</Text>
-          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up.</Text>
+          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up</Text>
         </Text>
       </View>
 
@@ -136,7 +136,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { 
-    paddingTop: 25, 
+    paddingTop: 35, 
     paddingVertical: 32, 
     alignItems: 'center', 
     backgroundColor: '#101010', 
@@ -164,10 +164,11 @@ const styles = StyleSheet.create({
     },
 
   bleLabel: { 
-    color: '#fff', 
+    color: '#ff4444', 
     textAlign: 'center', 
     marginBottom: 18,
     fontFamily: INTER_BLACK,
+    fontSize: 16,
   },
 
   bleButton: { 

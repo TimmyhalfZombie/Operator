@@ -17,7 +17,7 @@ export default function ForgotPasswordView({ password, onChangePassword, onSend,
       <View style={styles.header}>
         <Text style={styles.brandRow}>
           <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal' }}>patch</Text>
-          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up.</Text>
+          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up</Text>
         </Text>
         <Text style={styles.subTitle}>Create a New Password</Text>
       </View>

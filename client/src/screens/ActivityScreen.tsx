@@ -2,23 +2,46 @@ import { router } from 'expo-router';
 import * as Icons from 'phosphor-react-native';
 import React, { useMemo } from 'react';
 import {
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useActivity } from '../features/useActivity';
 import { useImmersiveMode } from '../hooks/useImmersiveMode';
 
+// Prefer a real request id; fall back through common shapes.
+function resolveRequestId(x: any) {
+  return (
+    x?.id ??
+    x?._id ??
+    x?.requestId ??
+    x?.assistId ??
+    x?.assistanceId ??
+    x?.request?.id ??
+    x?.request?._id ??
+    null
+  );
+}
+
+// If your backend has a separate "activity id", try to capture it too.
+function resolveActivityId(x: any) {
+  return (
+    x?.activityId ??
+    x?.activity?.id ??
+    x?.id ??     // sometimes the row id itself is the activity id
+    x?._id ??
+    null
+  );
+}
+
 const BG = '#121212';
 const TEXT = '#EDEDED';
-const SUBTEXT = '#bababaff'; // lighter subtext
+const SUBTEXT = '#bababaff';
 const DIVIDER = '#1F1F1F';
 const GREEN = '#6EFF87';
-
-// Inter font families (ensure these are loaded in your app)
 const INTER_BLACK = 'Inter-Black';
 const INTER_MEDIUM = 'Inter-Medium';
 
@@ -43,7 +66,7 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
         </View>
         <View style={styles.itemTextWrap}>
           {isNew && <Text style={styles.badgeNew}>Request assistance</Text>}
-          <Text numberOfLines={1} style={styles.itemTitle}>{title}</Text>
+          <Text numberOfLines={1} style={isNew ? styles.itemTitleNew : styles.itemTitle}>{title}</Text>
           {!!subtitle && (
             <Text style={styles.itemSubtitle}>
               {subtitle.split('\n').map((line, index, arr) => (
@@ -92,9 +115,7 @@ function formatWhen(dt: string | Date) {
 }
 
 const ActivityScreen: React.FC = () => {
-  // Enable immersive mode
   useImmersiveMode();
-  
   const { newItems, recentItems, loading, error } = useActivity();
 
   const empty = useMemo(
@@ -105,7 +126,7 @@ const ActivityScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.headerWrap}>
-          <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal', fontSize: 25 }}>Activity</Text>
+        <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal', fontSize: 25 }}>Activity</Text>
       </View>
 
       <ScrollView
@@ -152,49 +173,42 @@ const ActivityScreen: React.FC = () => {
             <Text style={styles.sectionTitle}>Recent</Text>
             <View style={styles.card}>
               {recentItems.map((it, idx) => {
-                // Client information from database fields
-                const clientName = it?.clientName || 
-                                 it?.customerName || 
-                                 it?.contactName || 
-                                 'Client';
-                const vehicleModel = it?.vehicle?.model || 
-                                   it?.vehicleType || 
-                                   'Vehicle';
-                const clientLocation = it?.location?.address || 
-                                     it?.location?.formatted_address || 
-                                     it?.location?.display_name ||
-                                     it?.address || 
-                                     'Location';
+                const clientName = it?.clientName || it?.customerName || it?.contactName || 'Client';
+                const vehicleModel = it?.vehicle?.model || it?.vehicleType || 'Vehicle';
+                const clientLocation =
+                  it?.location?.address ||
+                  it?.location?.formatted_address ||
+                  it?.location?.display_name ||
+                  it?.address ||
+                  'Location';
                 const date = formatWhen(it.createdAt);
-                
+
                 const title = clientName;
                 const subtitle = `${vehicleModel}\n${clientLocation}\n${date}`;
 
-                // Client location from Mongo: coordinates = [lng, lat]
-                const clientLng = it?.location?.coordinates?.[0];
-                const clientLat = it?.location?.coordinates?.[1];
+                const onPress = () => {
+                  const rid = resolveRequestId(it);
+                  const aid = resolveActivityId(it);
 
-                const clientIdParam =
-                  String(
-                    it?.customer?.id ||
-                      it?.owner?.id ||
-                      it?.clientId ||
-                      it?.userId ||
-                      ''
-                  ) || undefined;
+                  // keep snapshot small (prefer _raw if present)
+                  let snapSrc: any = it?._raw ?? it;
+                  // strip very heavy fields if any
+                  const { image, photo, ...rest } = snapSrc || {};
+                  const snap = encodeURIComponent(JSON.stringify(rest || {}));
 
-                const params: Record<string, string> = {};
-                if (clientIdParam) params.clientId = clientIdParam;
-                if (Number.isFinite(clientLat) && Number.isFinite(clientLng)) {
-                  params.clientLat = String(clientLat as number);
-                  params.clientLng = String(clientLng as number);
-                }
-                if (it?.id) params.activityId = String(it.id);
+                  const qs = new URLSearchParams();
+                  if (rid) qs.set('id', String(rid));
+                  if (aid && String(aid) !== String(rid)) qs.set('activityId', String(aid));
+                  qs.set('snap', snap);
 
-                const onPress = () => router.push({ pathname: '/activity-detail', params });
+                  const url = `/activity-detail?${qs.toString()}`;
+                  console.log('[RecentActivity] push detail with', { rid, aid, url });
+
+                  router.push(url);
+                };
 
                 return (
-                  <React.Fragment key={it.id}>
+                  <React.Fragment key={resolveRequestId(it) ?? it.id ?? idx}>
                     <ActivityItem
                       title={title}
                       subtitle={subtitle}
@@ -215,96 +229,57 @@ const ActivityScreen: React.FC = () => {
 export default ActivityScreen;
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: BG },
-  headerWrap: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 6 },
-  headerText: {
-    color: '#44ff75',
-    fontSize: 25,
-    fontFamily: INTER_BLACK,
+  safe: { 
+    flex: 1, 
+    backgroundColor: BG 
   },
 
-  scroll: { flex: 1, paddingHorizontal: 14 },
+  headerWrap: { 
+    paddingHorizontal: 20, 
+    paddingTop: 20, 
+    paddingBottom: 6
+   },
+
+  headerText: { 
+    color: '#44ff75', 
+    fontSize: 25, 
+    fontFamily: INTER_BLACK 
+  },
+
+  scroll: { 
+    flex: 1, 
+    paddingHorizontal: 14 
+  },
 
   sectionTitle: {
-    color: TEXT,
-    opacity: 0.9,
-    fontSize: 14,
-    marginLeft: 6,
+    color: TEXT, 
+    opacity: 0.9, 
+    fontSize: 14, 
+    marginLeft: 6, 
     marginBottom: 8,
-    marginTop: 12,
-    fontFamily: INTER_BLACK,
+     marginTop: 12, 
+     fontFamily: INTER_BLACK,
   },
-
+  
   card: { borderRadius: 16, paddingVertical: 8 },
   sectionSpacer: { height: 8 },
-
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-  },
-  itemLeft: {
-    flexDirection: 'row',
-    flex: 1,
-    alignItems: 'center',
-    gap: 12 as any,
-  },
+  itemRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 12 },
+  itemLeft: { flexDirection: 'row', flex: 1, alignItems: 'center', gap: 12 as any },
   itemIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: GREEN,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(110,255,135,0.08)',
+    width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: GREEN,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(110,255,135,0.08)',
   },
   itemTextWrap: { flex: 1 },
-
-  badgeNew: { 
-    color: GREEN, 
-    fontSize: 15, 
-    marginBottom: 2,
-    fontFamily: INTER_BLACK,
-  },
-
-  itemTitle: { 
-    color: TEXT, 
-    fontSize: 18,            // bigger
-    fontFamily: INTER_BLACK, // bolder
-  },
-
-  itemSubtitle: {
-    color: SUBTEXT, 
-    fontSize: 14,
-    fontFamily: INTER_MEDIUM,            // bigger // bolder
-    // removed fontWeight to avoid conflicts with custom font
-  },
-
-  vehicleModel: {
-    fontSize: 16,            // bigger
-    fontFamily: INTER_BLACK, // bolder
-    color: '#F0F0F0',        // lighter color
-    marginTop: 2,
-  },
-
+  badgeNew: { color: GREEN, fontSize: 15, marginBottom: 2, fontFamily: INTER_BLACK },
+  itemTitle: { color: TEXT, fontSize: 18, fontFamily: INTER_BLACK },
+  itemTitleNew: { color: TEXT, fontSize: 12, fontFamily: INTER_MEDIUM },
+  itemSubtitle: { color: SUBTEXT, fontSize: 14, fontFamily: INTER_MEDIUM },
+  vehicleModel: { fontSize: 16, fontFamily: INTER_BLACK, color: '#F0F0F0', marginTop: 2 },
   itemRight: { width: 28, alignItems: 'flex-end' },
   newDot: { width: 10, height: 10, borderRadius: 6, backgroundColor: GREEN },
   checkWrap: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: GREEN,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: GREEN,
+    alignItems: 'center', justifyContent: 'center',
   },
-
-  divider: {
-    height: 1,
-    marginLeft: 54,
-    marginVertical: 12,
-    backgroundColor: DIVIDER,
-  },
+  divider: { height: 1, marginLeft: 54, marginVertical: 12, backgroundColor: DIVIDER },
 });

@@ -192,8 +192,9 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
             
             operatorInfo = {
               name: operator.name || 'Operator',
-              location: operator.last_address || (lat && lng ? 
+              location: operator.last_address || operator.initial_address || (lat && lng ? 
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+              initial_address: operator.initial_address || null,
               lastSeen: lastSeen || null,
             };
           }
@@ -213,8 +214,9 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
             
             operatorInfo = {
               name: operator.name || 'Operator',
-              location: operator.last_address || (lat && lng ? 
+              location: operator.last_address || operator.initial_address || (lat && lng ? 
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+              initial_address: operator.initial_address || null,
               lastSeen: lastSeen || null,
               acceptedAt: d.updatedAt || d.updated_at || null, // Use updatedAt as acceptance time
             };
@@ -304,13 +306,18 @@ router.get('/next', requireAuth, async (_req, res, next) => {
 router.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid id' });
+    
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid id' });
+    }
 
     const db = getCustomerDb();
     const coll = db.collection('assistrequests');
 
     const doc = await coll.findOne({ _id: new ObjectId(id) });
-    if (!doc) return res.status(404).json({ message: 'Request not found' });
+    if (!doc) {
+      return res.status(404).json({ message: 'Request not found' });
+    }
 
     const coords = extractCoords(doc);
     
@@ -326,8 +333,9 @@ router.get('/:id', requireAuth, async (req, res, next) => {
           
           operatorInfo = {
             name: operator.name || 'Operator',
-            location: operator.last_address || (lat && lng ? 
+            location: operator.last_address || operator.initial_address || (lat && lng ? 
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+            initial_address: operator.initial_address || null,
             lastSeen: lastSeen || null,
             acceptedAt: doc.updatedAt || doc.updated_at || null,
           };
@@ -346,8 +354,9 @@ router.get('/:id', requireAuth, async (req, res, next) => {
           
           operatorInfo = {
             name: operator.name || 'Operator',
-            location: operator.last_address || (lat && lng ? 
+            location: operator.last_address || operator.initial_address || (lat && lng ? 
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+            initial_address: operator.initial_address || null,
             lastSeen: lastSeen || null,
             acceptedAt: doc.updatedAt || doc.updated_at || null,
           };
@@ -357,7 +366,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       }
     }
     
-    res.json({
+    const response = {
       id: String(doc._id),
       status: doc.status,
       clientName: pickClientName(doc),
@@ -378,8 +387,149 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       createdAt: doc?.createdAt ?? null,
       updatedAt: doc?.updatedAt ?? null,
       operator: operatorInfo,
-    });
+    };
+    
+    res.json(response);
   } catch (e) {
+    next(e);
+  }
+});
+
+/* ================================================================================ */
+/* Universal request resolver – GET /api/assist/resolve/:id                         */
+/* ================================================================================ */
+router.get('/resolve/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const db = getCustomerDb();
+    
+    // First try as assistance request
+    if (ObjectId.isValid(id)) {
+      const assistColl = db.collection('assistrequests');
+      const assistDoc = await assistColl.findOne({ _id: new ObjectId(id) });
+      
+      if (assistDoc) {
+        // Return the assistance request data
+        const coords = extractCoords(assistDoc);
+        
+        let operatorInfo = null;
+        if (assistDoc.status === 'completed' && assistDoc.completedBy) {
+          try {
+            const operator = await db.collection('operators').findOne({ user_id: String(assistDoc.completedBy) });
+            if (operator) {
+              const lat = operator.last_lat;
+              const lng = operator.last_lng;
+              const lastSeen = operator.last_seen_at;
+              
+              operatorInfo = {
+                name: operator.name || 'Operator',
+                location: operator.last_address || (lat && lng ? 
+                  `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+                lastSeen: lastSeen || null,
+                acceptedAt: assistDoc.updatedAt || assistDoc.updated_at || null,
+              };
+            }
+          } catch (e) {
+            // Error fetching operator info - silently continue
+          }
+        }
+        
+        const response = {
+          id: String(assistDoc._id),
+          status: assistDoc.status,
+          clientName: pickClientName(assistDoc),
+          customerName: assistDoc.customerName || null,
+          contactName: assistDoc.contactName || null,
+          customerPhone: assistDoc.customerPhone || null,
+          placeName: pickPlaceName(assistDoc),
+          address: pickAddress(assistDoc),
+          coords: coords || null,
+          vehicle: assistDoc.vehicle || null,
+          location: assistDoc.location || null,
+          vehicleType: assistDoc?.vehicle?.model ?? null,
+          plateNumber: assistDoc?.vehicle?.plate ?? null,
+          phone: assistDoc?.customerPhone ?? null,
+          otherInfo: assistDoc?.vehicle?.notes ?? null,
+          rating: assistDoc?.rating ?? null,
+          completedAt: assistDoc?.completedAt ?? null,
+          createdAt: assistDoc?.createdAt ?? null,
+          updatedAt: assistDoc?.updatedAt ?? null,
+          operator: operatorInfo,
+        };
+        
+        return res.json(response);
+      }
+    }
+    
+    // If not found as assistance request, try as activity
+    const activityColl = db.collection('activities');
+    const activityDoc = await activityColl.findOne({ _id: new ObjectId(id) });
+    
+    if (activityDoc) {
+      // Get the related assistance request
+      const assistId = activityDoc.assistId || activityDoc.requestId || activityDoc.assistanceId;
+      if (assistId && ObjectId.isValid(assistId)) {
+        const assistColl = db.collection('assistrequests');
+        const assistDoc = await assistColl.findOne({ _id: new ObjectId(assistId) });
+        
+        if (assistDoc) {
+          // Return the assistance request data (same as above)
+          const coords = extractCoords(assistDoc);
+          
+          let operatorInfo = null;
+          if (assistDoc.status === 'completed' && assistDoc.completedBy) {
+            try {
+              const operator = await db.collection('operators').findOne({ user_id: String(assistDoc.completedBy) });
+              if (operator) {
+                const lat = operator.last_lat;
+                const lng = operator.last_lng;
+                const lastSeen = operator.last_seen_at;
+                
+                operatorInfo = {
+                  name: operator.name || 'Operator',
+                  location: operator.last_address || (lat && lng ? 
+                    `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
+                  lastSeen: lastSeen || null,
+                  acceptedAt: assistDoc.updatedAt || assistDoc.updated_at || null,
+                };
+              }
+            } catch (e) {
+              // Error fetching operator info - silently continue
+            }
+          }
+          
+          const response = {
+            id: String(assistDoc._id),
+            status: assistDoc.status,
+            clientName: pickClientName(assistDoc),
+            customerName: assistDoc.customerName || null,
+            contactName: assistDoc.contactName || null,
+            customerPhone: assistDoc.customerPhone || null,
+            placeName: pickPlaceName(assistDoc),
+            address: pickAddress(assistDoc),
+            coords: coords || null,
+            vehicle: assistDoc.vehicle || null,
+            location: assistDoc.location || null,
+            vehicleType: assistDoc?.vehicle?.model ?? null,
+            plateNumber: assistDoc?.vehicle?.plate ?? null,
+            phone: assistDoc?.customerPhone ?? null,
+            otherInfo: assistDoc?.vehicle?.notes ?? null,
+            rating: assistDoc?.rating ?? null,
+            completedAt: assistDoc?.completedAt ?? null,
+            createdAt: assistDoc?.createdAt ?? null,
+            updatedAt: assistDoc?.updatedAt ?? null,
+            operator: operatorInfo,
+          };
+          
+          return res.json(response);
+        }
+      }
+    }
+    
+    return res.status(404).json({ message: 'Request not found' });
+  } catch (e) {
+    console.error('[Server] Error in resolve endpoint:', e);
     next(e);
   }
 });

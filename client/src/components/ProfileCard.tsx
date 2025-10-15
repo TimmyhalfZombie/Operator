@@ -1,7 +1,7 @@
-import React from 'react';
-import { Dimensions, StyleSheet, Text, View, TouchableOpacity, ScrollView } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
 import * as Icons from 'phosphor-react-native';
+import React from 'react';
+import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import type { ProfileData } from '../screens/functions/profile';
 
 const colors = {
@@ -26,25 +26,29 @@ type Props = {
 
 export default function ProfileCard({ profile, onLogoutPress }: Props) {
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+    <View style={styles.container}>
       <View style={styles.headerWrap}>
-        <Svg width={width} height={160}>
-          <Path d={`M0 0 H${width} V140 L${width / 2} 160 L0 140 Z`} fill={colors.header} />
+        <Svg width={width} height={120}>
+          <Path d={`M0 0 H${width} V100 L${width / 2} 120 L0 100 Z`} fill={colors.header} />
         </Svg>
         <View style={styles.avatar}>
           <Icons.User size={32} color={colors.sub} />
         </View>
       </View>
 
-      <View style={styles.topSpacer} />
+      <View style={styles.contentContainer}>
+        <View style={styles.infoSection}>
+          <InfoChip icon={<Icons.User size={18} color={colors.chipText} />} label="Name"  value={profile.username || '—'} />
+          <InfoChip icon={<Icons.Phone size={18} color={colors.chipText} />} label="Phone" value={profile.phone || '—'} />
+          <InfoChip icon={<Icons.EnvelopeSimple size={18} color={colors.chipText} />} label="Email" value={profile.email || '—'} />
+        </View>
 
-      <InfoChip icon={<Icons.User size={18} color={colors.chipText} />} label="Name"  value={profile.username || '—'} />
-      <InfoChip icon={<Icons.Phone size={18} color={colors.chipText} />} label="Phone" value={profile.phone || '—'} />
-      <InfoChip icon={<Icons.EnvelopeSimple size={18} color={colors.chipText} />} label="Email" value={profile.email || '—'} />
-
-      {/* Logout button styled like the screenshot */}
-      <LogoutButton onPress={onLogoutPress} />
-    </ScrollView>
+        {/* Logout button positioned at bottom */}
+        <View style={styles.logoutSection}>
+          <LogoutButton onPress={onLogoutPress} />
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -95,28 +99,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  topSpacer: { height: TOP_SPACER },
+  contentContainer: {
+    flex: 1,
+    paddingTop: 50, // Reduced from TOP_SPACER
+    paddingHorizontal: 18,
+  },
+  infoSection: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.chipBg,
-    marginHorizontal: 18,
-    marginBottom: 14,
-    borderRadius: 24,
-    paddingVertical: 12,
+    marginBottom: 12, // Reduced margin
+    borderRadius: 20, // Slightly smaller radius
+    paddingVertical: 10, // Reduced padding
     paddingHorizontal: 14,
   },
   chipIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32, // Slightly smaller
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#e8ffee',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
   },
   chipLabel: { color: '#3d4b40', fontSize: 11, marginTop: 2 },
-  chipValue: { color: colors.chipText, fontSize: 16, fontWeight: '900' }, // bolder
+  chipValue: { color: colors.chipText, fontSize: 15, fontWeight: '900' }, // Slightly smaller font
+  logoutSection: {
+    paddingBottom: 20,
+    alignItems: 'center',
+  },
 });
 
 const logoutStyles = StyleSheet.create({
@@ -124,7 +139,6 @@ const logoutStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'center',
-    marginTop: 185,          // avoid huge fixed spacing; lets content grow naturally
     paddingHorizontal: 8,
     paddingVertical: 6,
     gap: 10,
