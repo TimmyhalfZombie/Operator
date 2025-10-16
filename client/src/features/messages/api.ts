@@ -10,11 +10,15 @@ export type ConversationPreview = {
 };
 
 export type ChatMessage = {
-  id: string;
+  id: string;                 // real id or a temp id like "tmp_xxx"
   conversationId: string;
-  from: string;
-  text: string;
-  createdAt: string;
+  from: string;               // userId of sender
+  text: string;               // message body
+  createdAt: string;          // ISO timestamp
+  // Client-only flags for UX
+  tempId?: string;
+  pending?: boolean;
+  failed?: boolean;
 };
 
 export async function listConversations(limit = 50): Promise<ConversationPreview[]> {

@@ -1,86 +1,125 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { ensureConversation } from '../features/messages/api';
+import {
+    ActivityIndicator,
+    FlatList,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { tokens } from '../auth/tokenStore';
 import { useChat } from '../features/messages/useChat';
 
-const BG = '#0E0E0E';
-const GREEN = '#44ff75';
-const TEXT = '#EDEDED';
+// Try to extract the current user's id from your token store.
+// Adjust these fallbacks to match what you actually save.
+function getMyId(): string {
+  return (
+    (tokens as any).userId ||
+    (tokens as any).user?.id ||
+    (tokens as any).profile?.id ||
+    (tokens as any).sub ||
+    (tokens as any).id ||
+    'me'
+  );
+}
 
-type Params = { id?: string | string[]; requestId?: string | string[]; peer?: string | string[] };
+const BG = '#121212';
+const CARD = '#1c1c1c';
+const GREEN = '#6EFF87';
+const BORDER = '#262626';
+const DIM = '#9AA09C';
 
 export default function ChatScreen() {
-  const p = useLocalSearchParams<Params>();
-  const initialId = Array.isArray(p.id) ? p.id[0] : p.id;
-  const pendingRequestId = Array.isArray(p.requestId) ? p.requestId[0] : p.requestId;
-  const pendingPeer = Array.isArray(p.peer) ? p.peer[0] : p.peer;
-  const [conversationId, setConversationId] = React.useState<string | undefined>(initialId);
-  const [draft, setDraft] = React.useState('');
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const myId = React.useMemo(getMyId, []);
+  const { messages, loading, send, setIsTyping } = useChat(id, myId);
 
-  console.log('ChatScreen - conversationId:', conversationId);
-  console.log('ChatScreen - params:', p);
+  const [text, setText] = React.useState('');
 
-  // If navigated without a conversation id, attempt to ensure one using requestId/peer
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!conversationId || conversationId === 'new') {
-        if (pendingRequestId || pendingPeer) {
-          try {
-            const res = await ensureConversation(pendingPeer || '', pendingRequestId);
-            if (!cancelled && res?.id) setConversationId(res.id);
-          } catch (e) {
-            console.log('ensureConversation in ChatScreen failed:', e);
-          }
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [conversationId, pendingRequestId, pendingPeer]);
-
-  const { messages, loading, typing, send, setIsTyping } = useChat(conversationId);
+  const onSend = () => {
+    const t = text.trim();
+    if (!t) return;
+    send(t);
+    setText('');
+  };
 
   return (
-    <KeyboardAvoidingView style={styles.safe} behavior={Platform.select({ ios: 'padding' })}>
-      <View style={styles.topbar}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12}><Text style={{ fontSize: 20 }}>←</Text></TouchableOpacity>
-        <Text style={styles.title}>Operator</Text>
-        <View style={{ width: 24 }} />
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.select({ ios: 'padding', android: undefined })}
+      keyboardVerticalOffset={Platform.select({ ios: 72, android: 0 })}
+    >
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+          <Text style={{ color: DIM }}>Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.title} numberOfLines={1}>
+          Chat
+        </Text>
+        <View style={styles.headerBtn} />
       </View>
 
-      <View style={styles.body}>
-        {loading ? <ActivityIndicator /> : (
-          <>
-            {messages.map((m) => {
-              const mine = false; // optional: compare with current user id from tokenStore
-              return (
-                <View key={m.id} style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
-                  <Text style={[styles.msgText, mine ? styles.mineText : styles.theirsText]}>{m.text}</Text>
-                  <Text style={styles.time}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+      {/* Messages */}
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator />
+        </View>
+      ) : (
+        <FlatList
+          data={messages}
+          keyExtractor={(m, i) => m.id || String(i)}
+          contentContainerStyle={{ padding: 12, paddingBottom: 16, flexGrow: 1, justifyContent: 'flex-end' }}
+          renderItem={({ item }) => {
+            const mine = item.from === myId;
+            return (
+              <View
+                style={[
+                  styles.row,
+                  mine ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.bubble,
+                    mine ? styles.bubbleMine : styles.bubbleOther,
+                    item.failed && styles.bubbleFailed,
+                  ]}
+                >
+                  <Text style={mine ? styles.textMine : styles.textOther}>{item.text}</Text>
+                  {item.pending && <Text style={styles.meta}>sending…</Text>}
+                  {item.failed && <Text style={styles.meta}>failed</Text>}
                 </View>
-              );
-            })}
-            {typing.length > 0 && <Text style={{ color: '#9aa', marginTop: 6 }}>typing…</Text>}
-          </>
-        )}
-      </View>
-
-      <View style={styles.inputRow}>
-        <TouchableOpacity style={styles.attach}><Text>➕</Text></TouchableOpacity>
-        <TextInput
-          value={draft}
-          onChangeText={(t) => { setDraft(t); setIsTyping(true); }}
-          onBlur={() => setIsTyping(false)}
-          placeholder="Type here"
-          placeholderTextColor="#888"
-          style={styles.input}
+              </View>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={{ padding: 20 }}>
+              <Text style={{ color: DIM, textAlign: 'center' }}>No messages yet</Text>
+            </View>
+          }
         />
-        <TouchableOpacity
-          style={styles.send}
-          onPress={() => { if (draft.trim()) { send(draft.trim()); setDraft(''); setIsTyping(false); } }}
-        >
-          <Text style={{ color: '#0a0a0a', fontWeight: '800' }}>Send</Text>
+      )}
+
+      {/* Composer */}
+      <View style={styles.composer}>
+        <TextInput
+          value={text}
+          onChangeText={(v) => {
+            setText(v);
+            setIsTyping?.(!!v);
+          }}
+          placeholder="Type a message"
+          placeholderTextColor="#8A8A8A"
+          style={styles.input}
+          multiline
+        />
+        <TouchableOpacity onPress={onSend} style={styles.sendBtn}>
+          <Text style={{ color: '#0B0B0B', fontWeight: '700' }}>Send</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -88,19 +127,54 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: BG },
-  topbar: { height: 56, backgroundColor: GREEN, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, justifyContent: 'space-between' },
-  title: { fontSize: 18, fontWeight: '800' },
-  body: { flex: 1, padding: 14 },
-  bubble: { maxWidth: '80%', borderRadius: 16, padding: 10, marginBottom: 8 },
-  theirs: { alignSelf: 'flex-start', backgroundColor: GREEN, borderTopLeftRadius: 4 },
-  mine: { alignSelf: 'flex-end', backgroundColor: '#4a4a4a', borderTopRightRadius: 4 },
-  msgText: { fontSize: 15 },
-  theirsText: { color: '#0a0a0a', fontWeight: '700' },
-  mineText: { color: TEXT, fontWeight: '700' },
-  time: { color: '#aaa', fontSize: 11, marginTop: 4, alignSelf: 'flex-end' },
-  inputRow: { flexDirection: 'row', alignItems: 'center', padding: 10, gap: 8, borderTopColor: '#1c1c1c', borderTopWidth: StyleSheet.hairlineWidth },
-  attach: { backgroundColor: '#1c1c1c', width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  input: { flex: 1, backgroundColor: '#1c1c1c', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, color: TEXT },
-  send: { backgroundColor: GREEN, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
+  container: { flex: 1, backgroundColor: BG },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  header: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: BORDER,
+  },
+  headerBtn: { width: 60, paddingVertical: 8 },
+  title: { flex: 1, textAlign: 'center', color: '#EDEDED', fontSize: 16, fontWeight: '700' },
+
+  row: { flexDirection: 'row', marginVertical: 6 },
+  bubble: {
+    maxWidth: '78%',
+    borderRadius: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  bubbleMine: { backgroundColor: GREEN },
+  bubbleOther: { backgroundColor: CARD, borderWidth: StyleSheet.hairlineWidth, borderColor: '#2A2A2A' },
+  bubbleFailed: { borderColor: '#ff6464', borderWidth: 1 },
+  textMine: { color: '#0B0B0B' },
+  textOther: { color: '#F2F2F2' },
+  meta: { color: DIM, fontSize: 11, marginTop: 4 },
+
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    padding: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: BORDER,
+  },
+  input: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 140,
+    padding: 10,
+    color: '#EDEDED',
+    backgroundColor: '#191919',
+    borderRadius: 12,
+  },
+  sendBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: GREEN,
+  },
 });

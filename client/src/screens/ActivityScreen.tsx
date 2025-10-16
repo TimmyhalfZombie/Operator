@@ -208,6 +208,7 @@ const ActivityScreen: React.FC = () => {
                   router.push(url);
                 };
 
+
                 return (
                   <React.Fragment key={resolveRequestId(it) ?? it.id ?? idx}>
                     <ActivityItem

@@ -220,6 +220,12 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
 
   const tabWidth = width / Math.max(routes.length, 1);
 
+  // Hide the custom tab bar on screens outside SAFE_TABS (e.g., chat)
+  const isSafeActive = SAFE_TABS.has(state.routes[state.index]?.name as string);
+  if (!isSafeActive) {
+    return null;
+  }
+
   return (
     <Animated.View pointerEvents="box-none" style={{ backgroundColor: BG }}>
       <View style={[styles.bar, { height: BAR_HEIGHT }]} onLayout={onLayout}>

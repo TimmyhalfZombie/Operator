@@ -238,15 +238,16 @@ export default function ActivityDetailScreen() {
         doc?.client?._id ||
         doc?.customer?._id ||
         null;
+      // If peer id is missing, navigate to ChatScreen and let it ensure using requestId
       if (!peerUserId) {
-        console.warn('No peer user id found on doc; cannot start conversation');
+        router.push({ pathname: '/chat/[id]', params: { id: 'new', requestId: String(requestId) } });
         return;
       }
-      const ensured = await ensureConversation(String(peerUserId), requestId ? String(requestId) : undefined);
+      const ensured = await ensureConversation(String(peerUserId), requestId ? String(requestId) : undefined).catch(() => null);
       if (ensured?.id) {
         router.push({ pathname: '/chat/[id]', params: { id: ensured.id } });
       } else {
-        // As a fallback, navigate to ChatScreen and let it ensure using requestId/peer
+        // Fallback: navigate and let ChatScreen ensure
         router.push({ pathname: '/chat/[id]', params: { id: 'new', requestId: String(requestId), peer: String(peerUserId) } });
       }
     } catch (e) {
