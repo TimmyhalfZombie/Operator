@@ -87,7 +87,7 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
           <View style={styles.newDot} />
         ) : (
           <View style={styles.checkWrap}>
-            <Icons.Check size={20} color="#000000" weight="bold" />
+            <Icons.Check size={15} color="#000000" weight="bold" />
           </View>
         )}
       </View>
@@ -357,12 +357,17 @@ const styles = StyleSheet.create({
   },
 
   checkWrap: {
-    width: 20, 
-    height: 20, 
-    borderRadius: 10, 
-    backgroundColor: '#9EF29E',
+    width: 18, 
+    height: 18, 
+    borderRadius: 13, 
+    backgroundColor: '#50FF80',
     alignItems: 'center', 
     justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
   },
 
   divider: { 
