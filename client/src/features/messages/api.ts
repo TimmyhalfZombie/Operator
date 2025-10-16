@@ -6,6 +6,7 @@ export type ConversationPreview = {
   lastMessage?: string | null;
   lastMessageAt?: string | null;
   unread?: number | null;
+  requestId?: string | null;
 };
 
 export type ChatMessage = {
@@ -30,6 +31,20 @@ export async function fetchMessages(conversationId: string, before?: string, lim
 }
 
 export async function sendMessage(conversationId: string, text: string): Promise<ChatMessage> {
-  const res = await api(`/api/conversations/${conversationId}/messages`, { auth: true, method: 'POST', body: { text } });
+  const res = await api(`/api/conversations/${conversationId}/messages`, {
+    auth: true,
+    method: 'POST',
+    body: { text },
+  });
   return (res?.data ?? res) as ChatMessage;
+}
+
+/** Optional helper when you only have request+peer and no conversation yet */
+export async function ensureConversation(peerUserId: string, requestId?: string): Promise<{ id: string }> {
+  const res = await api(`/api/conversations/ensure`, {
+    auth: true,
+    method: 'POST',
+    body: { peerUserId, requestId },
+  });
+  return (res?.data ?? res) as { id: string };
 }

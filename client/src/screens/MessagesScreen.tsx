@@ -1,7 +1,6 @@
 import { router } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { ensureConversation } from '../features/messages/api';
 import { useConversations } from '../features/messages/useConversations';
 
 const BG = '#0E0E0E';
@@ -27,22 +26,14 @@ function timeAgo(iso?: string | null) {
 export default function MessagesScreen() {
   const { items, loading, error, reload } = useConversations();
 
-  const handleConversationPress = async (item: any) => {
-    try {
-      // Ensure the conversation exists before navigating
-      const result = await ensureConversation(item.peerUserId || 'unknown', item.requestId);
-      router.push({ pathname: '/chat/[id]', params: { id: result.id } });
-    } catch (e) {
-      console.error('Error ensuring conversation:', e);
-      // Fallback: try to navigate with the original ID
-      router.push({ pathname: '/chat/[id]', params: { id: item.id } });
-    }
+  const handleConversationPress = (item: any) => {
+    router.push({ pathname: '/chat/[id]', params: { id: item.id } });
   };
 
   return (
     <View style={styles.safe}>
       <View style={styles.header}>
-        <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal', fontSize: 28 }}>Messages</Text>
+        <Text style={{ color: '#44ff75', fontFamily: 'Candal', fontSize: 28 }}>Messages</Text>
       </View>
 
       {loading ? (
@@ -61,11 +52,7 @@ export default function MessagesScreen() {
           contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              onPress={() => handleConversationPress(item)}
-              style={styles.row}
-              activeOpacity={0.8}
-            >
+            <TouchableOpacity onPress={() => handleConversationPress(item)} style={styles.row} activeOpacity={0.8}>
               <View style={styles.avatar} />
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>

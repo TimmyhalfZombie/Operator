@@ -28,7 +28,7 @@ export default function ChatScreen() {
         {loading ? <ActivityIndicator /> : (
           <>
             {messages.map((m) => {
-              const mine = false; // optional: compare with current user id from tokenStore
+              const mine = false; // compare against your auth user id if desired
               return (
                 <View key={m.id} style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
                   <Text style={[styles.msgText, mine ? styles.mineText : styles.theirsText]}>{m.text}</Text>

@@ -8,7 +8,8 @@ import authRoutes from './routes/auth';
 import geoRoutes from './routes/geo';
 import operatorRoutes from './routes/operator';
 import usersRoutes from './routes/users';
-import messagesRoutes from './routes/messages'; // 👈 NEW
+import messagesRoutes from './routes/messages';          // (optional/legacy)
+import conversationsRoutes from './routes/conversations'; // 👈 MESSAGES API USED BY CLIENT
 
 const app = express();
 
@@ -29,8 +30,15 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/assist', assistRoutes);
 app.use('/api/geo', geoRoutes);
+
+// Conversations API (this is what your client calls)
+app.use('/api/conversations', conversationsRoutes);
+
+// Other operator routes
 app.use('/api', operatorRoutes);
-app.use('/api/messages', messagesRoutes); // 👈 NEW
+
+// Optional/legacy in-memory messages (not used by client below)
+app.use('/api/messages', messagesRoutes);
 
 /* ---------- 404 ---------- */
 app.use((_req, res) => res.status(404).json({ message: 'Not found' }));

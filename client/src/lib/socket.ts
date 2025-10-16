@@ -1,13 +1,14 @@
 import { io, Socket } from 'socket.io-client';
 import { tokens } from '../auth/tokenStore';
-import { env } from '../lib/env';
+import { resolveApiBaseUrl } from './serverDiscovery';
 
 let socket: Socket | null = null;
 
-export function connectSocket() {
+export async function connectSocket() {
   const token = tokens.accessToken || (tokens as any).token || (tokens as any).idToken;
   if (!token) return null;
-  const url = env.API_BASE_URL || 'http://localhost:3000';
+
+  const url = await resolveApiBaseUrl(); // same base (port 3000)
   socket?.disconnect();
   socket = io(url, {
     path: '/socket.io',
@@ -16,5 +17,6 @@ export function connectSocket() {
   });
   return socket;
 }
+
 export const getSocket = () => socket;
 export const disconnectSocket = () => { socket?.disconnect(); socket = null; };
