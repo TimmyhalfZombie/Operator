@@ -1,3 +1,4 @@
+
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { NativeModules, Platform } from 'react-native';
@@ -173,5 +174,4 @@ export async function setApiBaseUrl(base: string): Promise<void> {
 	inMemoryBaseUrl = base.replace(/\/$/, '');
 	await SecureStore.setItemAsync(STORAGE_KEY, inMemoryBaseUrl);
 }
-
 

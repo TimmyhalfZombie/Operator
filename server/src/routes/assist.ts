@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ObjectId } from 'mongodb';
+import { Types } from 'mongoose';
 import { getCustomerDb } from '../db/connect';
 import { requireAuth } from '../middleware/jwt';
 
@@ -558,6 +559,51 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
     );
 
     if (!result || !result.value) return res.status(404).json({ message: 'Request not found or not pending' });
+
+    // Create a conversation between the operator and client
+    const doc = result.value;
+    const operatorId = new Types.ObjectId((req as any).user.id);
+    const clientUserId = doc.userId ? new Types.ObjectId(doc.userId) : null;
+    
+    console.log('Creating conversation for request:', id);
+    console.log('Operator ID:', (req as any).user.id);
+    console.log('Client User ID:', doc.userId);
+    console.log('Client User ID ObjectId:', clientUserId);
+    
+    if (clientUserId) {
+      try {
+        const conversationsColl = db.collection('conversations');
+        const members = [operatorId, clientUserId].sort();
+        
+        // Check if conversation already exists
+        let conversation = await conversationsColl.findOne({
+          members: { $all: members, $size: 2 },
+          requestId: new Types.ObjectId(id)
+        });
+        
+        console.log('Existing conversation:', conversation);
+        
+        // Create conversation if it doesn't exist
+        if (!conversation) {
+          const insertResult = await conversationsColl.insertOne({
+            members,
+            requestId: new Types.ObjectId(id),
+            lastMessageAt: new Date(),
+            createdAt: new Date(),
+            updatedAt: new Date()
+          });
+          console.log('Created conversation with ID:', insertResult.insertedId);
+        } else {
+          console.log('Conversation already exists with ID:', conversation._id);
+        }
+      } catch (convError) {
+        console.log('Error creating conversation:', convError);
+        // Don't fail the accept if conversation creation fails
+      }
+    } else {
+      console.log('No client userId found, skipping conversation creation');
+    }
+
     res.json({ ok: true });
   } catch (e) {
     next(e);

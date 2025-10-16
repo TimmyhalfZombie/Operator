@@ -101,7 +101,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     flex: 1,
-    paddingTop: 50, // Reduced from TOP_SPACER
+    paddingTop: -150, // Reduced from TOP_SPACER
     paddingHorizontal: 18,
   },
   infoSection: {

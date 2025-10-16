@@ -226,7 +226,7 @@ export default function ActivityDetailScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.topbar}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={{ padding: 8 }}>
+        <TouchableOpacity onPress={() => router.push('/activity')} hitSlop={12} style={{ padding: 8 }}>
           <Icons.ArrowLeft size={22} color="#0E0E0E" weight="bold" />
         </TouchableOpacity>
       </View>
@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
   bulletRed: { width: 14, height: 14, borderRadius: 7, backgroundColor: RED, marginTop: 8, marginRight: 6 },
   routeLine: { height: 240, width: 3, backgroundColor: BORDER, marginLeft: 6, marginVertical: 6 },
   placeName: { color: WHITE, fontWeight: '800', fontFamily: INTER_BLACK, fontSize: 18, marginBottom: 6 },
-  addr: { color: SUB, fontSize: 14, marginTop: 4, fontFamily: INTER_MEDIUM, lineHeight: 20 },
+  addr: { color: SUB, fontSize: 14, marginTop: 4, fontFamily: INTER_BLACK, lineHeight: 20 },
   ratingTitle: { color: WHITE, opacity: 0.9, marginBottom: 10, textAlign: 'center', fontFamily: INTER_MEDIUM },
   starsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 });

@@ -17,7 +17,7 @@ export default function Welcome() {
       {/* Brand */}
       <Text style={styles.brand}>
         <Text style={styles.brandGreen}>patch</Text>
-        <Text style={styles.brandWhite}> up.</Text>
+        <Text style={styles.brandWhite}> up</Text>
       </Text>
 
       {/* Tagline pinned to safe bottom */}

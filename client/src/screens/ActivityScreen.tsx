@@ -44,6 +44,7 @@ const DIVIDER = '#1F1F1F';
 const GREEN = '#6EFF87';
 const INTER_BLACK = 'Inter-Black';
 const INTER_MEDIUM = 'Inter-Medium';
+const INTER_REGULAR = 'Inter-Regular';
 
 type ActivityItemProps = {
   title: string;
@@ -66,13 +67,13 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
         </View>
         <View style={styles.itemTextWrap}>
           {isNew && <Text style={styles.badgeNew}>Request assistance</Text>}
-          <Text numberOfLines={1} style={isNew ? styles.itemTitleNew : styles.itemTitle}>{title}</Text>
+          <Text numberOfLines={1} style={isNew ? styles.itemTitleNewBold : styles.itemTitle}>{title}</Text>
           {!!subtitle && (
-            <Text style={styles.itemSubtitle}>
+            <Text style={isNew ? styles.itemSubtitleNew : styles.itemSubtitle}>
               {subtitle.split('\n').map((line, index, arr) => (
                 <Text
                   key={index}
-                  style={index === 0 ? styles.vehicleModel : styles.itemSubtitle}
+                  style={isNew ? styles.itemSubtitleNew : (index === 0 ? styles.vehicleModel : styles.itemSubtitle)}
                 >
                   {line}{index < arr.length - 1 ? '\n' : ''}
                 </Text>
@@ -86,7 +87,7 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
           <View style={styles.newDot} />
         ) : (
           <View style={styles.checkWrap}>
-            <Icons.Check size={16} color={GREEN} weight="bold" />
+            <Icons.Check size={20} color="#000000" weight="bold" />
           </View>
         )}
       </View>
@@ -261,25 +262,113 @@ const styles = StyleSheet.create({
      fontFamily: INTER_BLACK,
   },
   
-  card: { borderRadius: 16, paddingVertical: 8 },
-  sectionSpacer: { height: 8 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 12 },
-  itemLeft: { flexDirection: 'row', flex: 1, alignItems: 'center', gap: 12 as any },
+  card: { 
+    borderRadius: 16, 
+    paddingVertical: 8
+  },
+
+  sectionSpacer: { 
+    height: 8 
+  },
+
+  itemRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingHorizontal: 10, 
+    paddingVertical: 12 
+  },
+
+  itemLeft: { 
+    flexDirection: 'row', 
+    flex: 1, 
+    alignItems: 'center', 
+    gap: 12 as any 
+  },
+
   itemIcon: {
-    width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: GREEN,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(110,255,135,0.08)',
+    width: 32, 
+    height: 32, 
+    borderRadius: 16, 
+    borderWidth: 1,
+     borderColor: GREEN,
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    backgroundColor: 'rgba(110,255,135,0.08)',
   },
-  itemTextWrap: { flex: 1 },
-  badgeNew: { color: GREEN, fontSize: 15, marginBottom: 2, fontFamily: INTER_BLACK },
-  itemTitle: { color: TEXT, fontSize: 18, fontFamily: INTER_BLACK },
-  itemTitleNew: { color: TEXT, fontSize: 12, fontFamily: INTER_MEDIUM },
-  itemSubtitle: { color: SUBTEXT, fontSize: 14, fontFamily: INTER_MEDIUM },
-  vehicleModel: { fontSize: 16, fontFamily: INTER_BLACK, color: '#F0F0F0', marginTop: 2 },
-  itemRight: { width: 28, alignItems: 'flex-end' },
-  newDot: { width: 10, height: 10, borderRadius: 6, backgroundColor: GREEN },
+
+  itemTextWrap: { 
+    flex: 1 
+  },
+
+  badgeNew: { 
+    color: GREEN, 
+    fontSize: 15,
+    marginBottom: 2, 
+    fontFamily: INTER_BLACK 
+  },
+
+  itemTitle: { 
+    color: TEXT, 
+    fontSize: 18, 
+    fontFamily: INTER_BLACK 
+  },
+
+  itemTitleNew: { 
+    color: TEXT, 
+    fontSize: 12, 
+    fontFamily: INTER_MEDIUM 
+  },
+
+  itemTitleNewBold: { 
+    color: TEXT, 
+    fontSize: 17, 
+    fontFamily: INTER_BLACK 
+  },
+
+  itemSubtitleNew: { 
+    color: SUBTEXT, 
+    fontSize: 14, 
+    fontFamily: INTER_REGULAR 
+  },
+
+  itemSubtitle: { 
+    color: SUBTEXT, 
+    fontSize: 14, 
+    fontFamily: INTER_MEDIUM 
+  },
+
+  vehicleModel: { 
+    fontSize: 16, 
+    fontFamily: INTER_BLACK, 
+    color: '#F0F0F0', 
+    marginTop: 2 
+  },
+
+  itemRight: { 
+    width: 28, 
+    alignItems: 'flex-end' 
+  },
+
+  newDot: { 
+    width: 10, 
+    height: 10, 
+    borderRadius: 6, 
+    backgroundColor: GREEN 
+  },
+
   checkWrap: {
-    width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: GREEN,
-    alignItems: 'center', justifyContent: 'center',
+    width: 20, 
+    height: 20, 
+    borderRadius: 10, 
+    backgroundColor: '#9EF29E',
+    alignItems: 'center', 
+    justifyContent: 'center',
   },
-  divider: { height: 1, marginLeft: 54, marginVertical: 12, backgroundColor: DIVIDER },
+
+  divider: { 
+    height: 1, 
+    marginLeft: 54, 
+    marginVertical: 12, 
+    backgroundColor: DIVIDER 
+  },
 });

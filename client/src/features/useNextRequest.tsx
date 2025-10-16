@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { AssistanceRequest } from './assistance/types';
 import { acceptAssist, declineAssist, fetchNextAssist } from './assistance/api';
+import { AssistanceRequest } from './assistance/types';
 
 const ACTIVE_MS = 10_000;     // poll every 10s in foreground
 const BACKGROUND_MS = 30_000; // poll every 30s in background
