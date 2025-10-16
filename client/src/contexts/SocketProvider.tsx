@@ -1,34 +1,23 @@
-// client/src/contexts/SocketProvider.tsx
 import React from 'react';
-import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 import { tokens } from '../auth/tokenStore';
+import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 
-type Ctx = { socket: ReturnType<typeof getSocket> };
-export const SocketContext = React.createContext<Ctx>({ socket: null });
+export const SocketContext = React.createContext<{ socket: ReturnType<typeof getSocket> }>({ socket: null });
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
-  const [_, force] = React.useReducer((x) => x + 1, 0);
+  const [rev, bump] = React.useReducer((x) => x + 1, 0);
 
   React.useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const s = await connectSocket();
-      if (!mounted || !s) return;
-      const rerender = () => force();
-      s.on('connect', rerender);
-      s.on('disconnect', rerender);
-    })();
-
+    const s = connectSocket();
+    const ready = () => bump();
+    s?.on('connect', ready);
+    s?.on('disconnect', ready);
     return () => {
-      mounted = false;
+      s?.off('connect', ready);
+      s?.off('disconnect', ready);
       disconnectSocket();
     };
-    // re-connect whenever the access token changes
-  }, [tokens.getAccess()]); // note: if you have an event emitter, use that instead
+  }, [tokens.accessToken]);
 
-  return (
-    <SocketContext.Provider value={{ socket: getSocket() }}>
-      {children}
-    </SocketContext.Provider>
-  );
+  return <SocketContext.Provider value={{ socket: getSocket() }}>{children}</SocketContext.Provider>;
 }

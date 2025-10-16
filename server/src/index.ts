@@ -1,7 +1,7 @@
 import http from 'http';
 import app from './app';
-import './db/connect';
 import { initSocket } from './socket';
+import './db/connect';
 
 const port = Number(process.env.PORT || 3000);
 const server = http.createServer(app);

@@ -15,13 +15,9 @@ export function useChat(conversationId?: string) {
     (async () => {
       setLoading(true);
       try {
-        console.log('useChat - fetching messages for conversationId:', conversationId);
         const hist = await fetchMessages(conversationId);
-        console.log('useChat - fetched messages:', hist);
         if (!live) return;
         setMessages(hist);
-      } catch (error) {
-        console.log('useChat - error fetching messages:', error);
       } finally { if (live) setLoading(false); }
     })();
     return () => { live = false; };

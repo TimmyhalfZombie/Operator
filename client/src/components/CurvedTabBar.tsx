@@ -3,20 +3,20 @@ import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import * as Icons from "phosphor-react-native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Dimensions,
-  LayoutChangeEvent,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Dimensions,
+    LayoutChangeEvent,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Animated, {
-  Easing,
-  useAnimatedProps,
-  useAnimatedStyle,
-  useDerivedValue,
-  useSharedValue,
-  withTiming,
+    Easing,
+    useAnimatedProps,
+    useAnimatedStyle,
+    useDerivedValue,
+    useSharedValue,
+    withTiming,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 
@@ -24,7 +24,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 // Colors
 const BG = "#121212";
-const BAR_BG = "#1E1E1E";
+const BAR_BG = "rgba(30, 30, 30, 0.8)";
 const BAR_BORDER = "#0A0A0A";
 const ACTIVE_GREEN = "#6EFF87";
 const INACTIVE_TEXT = "#B9B9B9";

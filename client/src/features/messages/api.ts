@@ -33,8 +33,3 @@ export async function sendMessage(conversationId: string, text: string): Promise
   const res = await api(`/api/conversations/${conversationId}/messages`, { auth: true, method: 'POST', body: { text } });
   return (res?.data ?? res) as ChatMessage;
 }
-
-export async function ensureConversation(peerUserId: string, requestId?: string): Promise<{ id: string }> {
-  const res = await api('/api/conversations/ensure', { auth: true, method: 'POST', body: { peerUserId, requestId } });
-  return (res?.data ?? res) as { id: string };
-}

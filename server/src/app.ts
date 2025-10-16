@@ -5,11 +5,10 @@ import { config } from './config';
 
 import assistRoutes from './routes/assist';
 import authRoutes from './routes/auth';
-import conversationsRoutes from './routes/conversations';
 import geoRoutes from './routes/geo';
-import messagesRoutes from './routes/messages';
 import operatorRoutes from './routes/operator';
 import usersRoutes from './routes/users';
+import messagesRoutes from './routes/messages'; // 👈 NEW
 
 const app = express();
 
@@ -31,8 +30,7 @@ app.use('/api/users', usersRoutes);
 app.use('/api/assist', assistRoutes);
 app.use('/api/geo', geoRoutes);
 app.use('/api', operatorRoutes);
-app.use('/api/messages', messagesRoutes);
-app.use('/api/conversations', conversationsRoutes);
+app.use('/api/messages', messagesRoutes); // 👈 NEW
 
 /* ---------- 404 ---------- */
 app.use((_req, res) => res.status(404).json({ message: 'Not found' }));

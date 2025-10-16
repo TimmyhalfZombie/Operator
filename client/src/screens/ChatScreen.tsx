@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useChat } from '../features/messages/useChat';
@@ -13,9 +13,6 @@ export default function ChatScreen() {
   const p = useLocalSearchParams<Params>();
   const conversationId = Array.isArray(p.id) ? p.id[0] : p.id;
   const [draft, setDraft] = React.useState('');
-
-  console.log('ChatScreen - conversationId:', conversationId);
-  console.log('ChatScreen - params:', p);
 
   const { messages, loading, typing, send, setIsTyping } = useChat(conversationId);
 

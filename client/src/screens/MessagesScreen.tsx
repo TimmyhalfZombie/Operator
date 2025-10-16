@@ -1,144 +1,104 @@
-import * as Icons from 'phosphor-react-native';
+import { router } from 'expo-router';
 import React from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
-import { useMessages } from '../features/useMessages';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ensureConversation } from '../features/messages/api';
+import { useConversations } from '../features/messages/useConversations';
 
-const colors = {
-  bg: '#101010',
-  card: '#101010',
-  border: '#222',
-  brandGreen: '#44ff75',
-  text: '#ffffff',
-  sub: '#bdbdbd',
-};
+const BG = '#0E0E0E';
+const CARD = '#161616';
+const GREEN = '#44ff75';
+const TEXT = '#EDEDED';
+const SUB = '#9FA0A4';
 
-type Msg = {
-  id: string;
-  name: string;
-  preview: string;
-  time: string; // "now", "10 hrs", etc.
-  unread?: boolean;
-};
-
-const DATA: Msg[] = [
-  { id: '1', name: 'Isabella Ramos', preview: '1 new message', time: 'now', unread: true },
-  { id: '2', name: 'Diego Morales', preview: 'Location: Villa Arevalo…', time: '10 hrs' },
-  { id: '3', name: 'Sofia Hernandez', preview: 'Location: Poto…', time: '13 hrs' },
-  { id: '4', name: 'Sebastian Lopez', preview: 'Location: Circumferential Road…', time: '17 hrs' },
-  { id: '5', name: 'Valentina Castro', preview: 'Location: Dumangas…', time: '22 hrs' },
-  { id: '6', name: 'Mateo Rodriguez', preview: 'Location: Leganes…', time: '31 hrs' },
-  { id: '7', name: 'Camila Gutierrez', preview: 'Location: Iloilo City…', time: '2 days' },
-  { id: '8', name: 'Santiago Jimenez', preview: 'Location: Jaro…', time: '3 days' },
-  { id: '9', name: 'Valeria Martinez', preview: 'Location: Mandurriao…', time: '4 days' },
-  { id: '10', name: 'Nicolas Fernandez', preview: 'Location: La Paz…', time: '5 days' },
-];
+function timeAgo(iso?: string | null) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const diff = Math.max(0, Date.now() - d.getTime());
+  const h = Math.floor(diff / 3600000);
+  if (h < 1) {
+    const m = Math.floor(diff / 60000);
+    return m <= 1 ? 'now' : `${m} min`;
+  }
+  if (h < 24) return `${h} hrs`;
+  const days = Math.floor(h / 24);
+  return `${days} d`;
+}
 
 export default function MessagesScreen() {
-  const { data } = useMessages();
-  const list = (data?.length ? data : DATA) as Msg[];
+  const { items, loading, error, reload } = useConversations();
 
-  const renderItem = ({ item }: { item: Msg }) => (
-    <View style={styles.row}>
-      {/* avatar */}
-      <View style={styles.avatar}>
-        <Icons.User size={22} color={colors.sub} />
-      </View>
-
-      {/* center text */}
-      <View style={styles.textCol}>
-        <Text style={styles.name}>{item.name}</Text>
-        <Text style={[styles.preview, item.unread && { color: colors.brandGreen }]}>
-          {item.preview}
-        </Text>
-      </View>
-
-      {/* right meta */}
-      <View style={styles.metaCol}>
-        <Text style={styles.time}>{item.time}</Text>
-        {item.unread ? <View style={styles.dot} /> : <View style={{ width: 8, height: 8 }} />}
-      </View>
-    </View>
-  );
+  const handleConversationPress = async (item: any) => {
+    try {
+      // Ensure the conversation exists before navigating
+      const result = await ensureConversation(item.peerUserId || 'unknown', item.requestId);
+      router.push({ pathname: '/chat/[id]', params: { id: result.id } });
+    } catch (e) {
+      console.error('Error ensuring conversation:', e);
+      // Fallback: try to navigate with the original ID
+      router.push({ pathname: '/chat/[id]', params: { id: item.id } });
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      {/* brand */}
-      <View style={styles.brandWrap}>
-        <Text style={styles.brand}>
-          <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal' }}>patch</Text>
-          <Text style={{ color: '#fff', fontWeight: 'normal', fontFamily: 'Candal' }}> up</Text>
-        </Text>
+    <View style={styles.safe}>
+      <View style={styles.header}>
+        <Text style={{ color: '#44ff75', fontWeight: 'normal', fontFamily: 'Candal', fontSize: 28 }}>Messages</Text>
       </View>
 
-      {/* header */}
-      <Text style={styles.pageTitle}>Message</Text>
-
-      {/* list */}
-      <FlatList
-        data={list}
-        keyExtractor={(it) => it.id}
-        renderItem={renderItem}
-        ItemSeparatorComponent={() => <View style={styles.sep} />}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <View style={{ paddingTop: 30 }}><ActivityIndicator /></View>
+      ) : error ? (
+        <View style={{ padding: 16 }}><Text style={{ color: '#ff9d9d' }}>{String(error)}</Text></View>
+      ) : items.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No conversations yet</Text>
+          <Text style={styles.emptySubtext}>Start a conversation from an assistance request</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(it) => it.id}
+          contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              onPress={() => handleConversationPress(item)}
+              style={styles.row}
+              activeOpacity={0.8}
+            >
+              <View style={styles.avatar} />
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.name} numberOfLines={1}>{item.title || 'Conversation'}</Text>
+                  <Text style={styles.time}>{timeAgo(item.lastMessageAt || undefined)}</Text>
+                </View>
+                {item.lastMessage ? (
+                  <Text style={styles.preview} numberOfLines={1}>{item.lastMessage}</Text>
+                ) : (
+                  <Text style={styles.preview} numberOfLines={1}>No messages yet</Text>
+                )}
+              </View>
+              {item.unread ? <View style={styles.unreadDot} /> : null}
+            </TouchableOpacity>
+          )}
+          onRefresh={reload}
+          refreshing={loading}
+        />
+      )}
     </View>
   );
 }
 
-const AVATAR = 44;
-
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: colors.bg 
-  },
-
-  brandWrap: { 
-    paddingHorizontal: 16, 
-    paddingTop: 36, 
-    paddingBottom: 8 
-  },
-
-  brand: { 
-    fontSize: 28, 
-    letterSpacing: 1 
-  },
-
-  pageTitle: {
-    color: colors.brandGreen,
-    fontSize: 18,
-    fontWeight: '800',
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  sep: { 
-    height: 1, 
-    backgroundColor: colors.border, 
-    marginLeft: AVATAR + 16,
-    marginVertical: 8
-  },
-  
-  avatar: {
-    width: AVATAR,
-    height: AVATAR,
-    borderRadius: AVATAR / 2,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  textCol: { flex: 1 },
-  name: { color: colors.text, fontWeight: '800', marginBottom: 2 },
-  preview: { color: colors.sub, fontSize: 12 },
-  metaCol: { alignItems: 'flex-end', gap: 6 },
-  time: { color: colors.sub, fontSize: 12 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brandGreen },
+  safe: { flex: 1, backgroundColor: BG },
+  header: { paddingHorizontal: 16, paddingTop: 50, paddingBottom: 8 },
+  row: { backgroundColor: CARD, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center' },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2d2d2d', marginRight: 12 },
+  name: { color: TEXT, fontSize: 16, fontWeight: '700', flex: 1 },
+  time: { color: SUB, marginLeft: 8, fontSize: 12 },
+  preview: { color: SUB, marginTop: 4 },
+  unreadDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: GREEN, marginLeft: 8 },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
+  emptyText: { color: TEXT, fontSize: 18, fontWeight: '600', marginBottom: 8 },
+  emptySubtext: { color: SUB, fontSize: 14, textAlign: 'center' },
 });
