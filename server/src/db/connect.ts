@@ -1,4 +1,5 @@
 import { Db, IndexDescription, MongoClient, MongoServerError } from 'mongodb';
+import mongoose from 'mongoose';
 import { config } from '../config';
 
 const client = new MongoClient(config.mongoUri, {
@@ -33,6 +34,12 @@ export async function connectDB(): Promise<Db> {
 
     const authDb = client.db(config.authDbName);
     const customerDb = client.db(config.customerDbName);
+
+    // Initialize Mongoose connection for models used elsewhere (e.g., conversations/messages)
+    // Use the customer DB by default for those collections
+    if (mongoose.connection.readyState === 0) {
+      await mongoose.connect(config.mongoUri, { dbName: config.customerDbName });
+    }
 
     await ensureAuthIndexes(authDb);
     await ensureCustomerIndexes(customerDb);
@@ -93,3 +100,15 @@ async function ensureCustomerIndexes(d: Db) {
   await safeEnsureIndex(d, 'assistrequests', { status: 1 }, { name: 'status_idx' });
   await safeEnsureIndex(d, 'assistrequests', { createdAt: -1 }, { name: 'createdAt_idx' });
 }
+
+// Kick off connection on import so server startup (importing this module) establishes DBs
+// and the Mongoose default connection for models.
+// eslint-disable-next-line @typescript-eslint/no-floating-promises
+(async () => {
+  try {
+    await connectDB();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to initialize database connections:', err);
+  }
+})();
