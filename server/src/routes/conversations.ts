@@ -1,10 +1,11 @@
 // server/src/routes/conversations.ts
 import { Router } from 'express';
+import { Types } from 'mongoose';
+import { getCustomerDb } from '../db/connect';
 import { requireAuth } from '../middleware/requireAuth';
 import { Conversation } from '../models/conversation';
 import { ConversationMeta } from '../models/conversationMeta';
 import { Message } from '../models/message';
-import { Types } from 'mongoose';
 
 const r = Router();
 
@@ -137,14 +138,28 @@ r.get('/:id/messages', requireAuth, async (req: any, res) => {
 /** Ensure/get a conversation for a specific request+peer */
 r.post('/ensure', requireAuth, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
-  const { peerUserId, requestId } = req.body as { peerUserId: string; requestId?: string };
+  let { peerUserId, requestId } = req.body as { peerUserId?: string; requestId?: string };
 
-  // For integrity, require ObjectIds for participants (prevents duplicates across types)
+  // Resolve peer from request if not provided
+  if (!peerUserId && requestId) {
+    if (!isValidOid(requestId)) {
+      return res.status(400).json({ message: 'requestId must be a valid ObjectId' });
+    }
+    try {
+      const d = await getCustomerDb()
+        .collection('assistrequests')
+        .findOne({ _id: new Types.ObjectId(requestId) }, { projection: { userId: 1 } as any });
+      const resolved = d?.userId ? String(d.userId) : undefined;
+      if (resolved && isValidOid(resolved)) peerUserId = resolved;
+    } catch {}
+  }
+
+  // Require valid ObjectIds for both participants
   if (!isValidOid(me) || !isValidOid(peerUserId)) {
     return res.status(400).json({ message: 'peerUserId and auth user must be valid ObjectIds' });
   }
 
-  const members = [new Types.ObjectId(me), new Types.ObjectId(peerUserId)].sort();
+  const members = [new Types.ObjectId(me), new Types.ObjectId(peerUserId!)].sort();
   const q: any = { members: { $all: members, $size: 2 } };
 
   if (requestId) {

@@ -78,7 +78,7 @@ export default function MessagesScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
-  header: { paddingHorizontal: 16, paddingTop: 50, paddingBottom: 8 },
+  header: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
   row: { backgroundColor: CARD, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center' },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2d2d2d', marginRight: 12 },
   name: { color: TEXT, fontSize: 16, fontWeight: '700', flex: 1 },

@@ -1,18 +1,43 @@
-import { useLocalSearchParams, router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ensureConversation } from '../features/messages/api';
 import { useChat } from '../features/messages/useChat';
 
 const BG = '#0E0E0E';
 const GREEN = '#44ff75';
 const TEXT = '#EDEDED';
 
-type Params = { id?: string | string[] };
+type Params = { id?: string | string[]; requestId?: string | string[]; peer?: string | string[] };
 
 export default function ChatScreen() {
   const p = useLocalSearchParams<Params>();
-  const conversationId = Array.isArray(p.id) ? p.id[0] : p.id;
+  const initialId = Array.isArray(p.id) ? p.id[0] : p.id;
+  const pendingRequestId = Array.isArray(p.requestId) ? p.requestId[0] : p.requestId;
+  const pendingPeer = Array.isArray(p.peer) ? p.peer[0] : p.peer;
+  const [conversationId, setConversationId] = React.useState<string | undefined>(initialId);
   const [draft, setDraft] = React.useState('');
+
+  console.log('ChatScreen - conversationId:', conversationId);
+  console.log('ChatScreen - params:', p);
+
+  // If navigated without a conversation id, attempt to ensure one using requestId/peer
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!conversationId || conversationId === 'new') {
+        if (pendingRequestId || pendingPeer) {
+          try {
+            const res = await ensureConversation(pendingPeer || '', pendingRequestId);
+            if (!cancelled && res?.id) setConversationId(res.id);
+          } catch (e) {
+            console.log('ensureConversation in ChatScreen failed:', e);
+          }
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [conversationId, pendingRequestId, pendingPeer]);
 
   const { messages, loading, typing, send, setIsTyping } = useChat(conversationId);
 
@@ -28,7 +53,7 @@ export default function ChatScreen() {
         {loading ? <ActivityIndicator /> : (
           <>
             {messages.map((m) => {
-              const mine = false; // compare against your auth user id if desired
+              const mine = false; // optional: compare with current user id from tokenStore
               return (
                 <View key={m.id} style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
                   <Text style={[styles.msgText, mine ? styles.mineText : styles.theirsText]}>{m.text}</Text>

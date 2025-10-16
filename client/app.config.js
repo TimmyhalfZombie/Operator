@@ -48,7 +48,7 @@ module.exports = ({ config }) => ({
 
   extra: {
     router: {},
-    API_URL: process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.27:3000',
+    API_URL: process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.62:3000',
     GEOAPIFY_KEY: process.env.EXPO_PUBLIC_GEOAPIFY_KEY || '',
     eas: { projectId: '7c38d5e4-763b-4d6c-b934-6ae6cd0a86f5' },
   },
@@ -57,6 +57,9 @@ module.exports = ({ config }) => ({
     bundleIdentifier: 'com.yourco.operator',
     supportsTablet: true,
     infoPlist: {
+      NSAppTransportSecurity: {
+        NSAllowsArbitraryLoads: true,
+      },
       NSBluetoothAlwaysUsageDescription:
         'This app uses Bluetooth to scan and connect to your vulcanizer device.',
       NSBluetoothPeripheralUsageDescription:
@@ -69,6 +72,7 @@ module.exports = ({ config }) => ({
   android: {
     package: 'com.shemuuu.operator',
     edgeToEdgeEnabled: true,
+    usesCleartextTraffic: true,
     permissions: [
       'android.permission.BLUETOOTH',
       'android.permission.BLUETOOTH_ADMIN',

@@ -5,6 +5,7 @@ import React from 'react';
 import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAssistByAnyId } from '../features/assistance/api';
+import { ensureConversation } from '../features/messages/api';
 import { getCompletedByAnyId } from '../lib/completedCache';
 
 const INTER_BLACK = 'Inter-Black';
@@ -54,6 +55,7 @@ export default function ActivityDetailScreen() {
   const [loading, setLoading] = React.useState(!!requestId);
   const [err, setErr] = React.useState('');
   const [doc, setDoc] = React.useState<any | null>(null);
+  const [msgBusy, setMsgBusy] = React.useState(false);
 
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const runningRef = React.useRef(false);
@@ -223,6 +225,37 @@ export default function ActivityDetailScreen() {
     timeRange = (p as any).timeRange || fmtRange(doc?.createdAt, doc?.updatedAt) || '—';
   }
 
+  async function handleMessagePress() {
+    try {
+      if (!doc) return;
+      setMsgBusy(true);
+      // Try to derive the peer (customer) user id from common fields
+      const peerUserId =
+        doc?.customerId ||
+        doc?.clientId ||
+        doc?.userId ||
+        doc?.user?._id ||
+        doc?.client?._id ||
+        doc?.customer?._id ||
+        null;
+      if (!peerUserId) {
+        console.warn('No peer user id found on doc; cannot start conversation');
+        return;
+      }
+      const ensured = await ensureConversation(String(peerUserId), requestId ? String(requestId) : undefined);
+      if (ensured?.id) {
+        router.push({ pathname: '/chat/[id]', params: { id: ensured.id } });
+      } else {
+        // As a fallback, navigate to ChatScreen and let it ensure using requestId/peer
+        router.push({ pathname: '/chat/[id]', params: { id: 'new', requestId: String(requestId), peer: String(peerUserId) } });
+      }
+    } catch (e) {
+      console.log('handleMessagePress error:', e);
+    } finally {
+      setMsgBusy(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.topbar}>
@@ -252,8 +285,8 @@ export default function ActivityDetailScreen() {
                 {contactName && <Text style={styles.customerContact}>Contact: {contactName}</Text>}
                 {customerPhone && <Text style={styles.customerPhone}>Phone: {customerPhone}</Text>}
               </View>
-              <TouchableOpacity hitSlop={10} style={styles.iconBtn}>
-                <Icons.EnvelopeSimple size={22} color={GREEN_DIM} weight="bold" />
+              <TouchableOpacity hitSlop={10} style={styles.iconBtn} onPress={handleMessagePress} disabled={msgBusy}>
+                <Icons.EnvelopeSimple size={22} color={msgBusy ? '#7fd190' : GREEN_DIM} weight="bold" />
               </TouchableOpacity>
             </View>
           </View>
