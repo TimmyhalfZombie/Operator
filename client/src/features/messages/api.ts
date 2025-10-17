@@ -10,17 +10,36 @@ export type ConversationPreview = {
   requestId?: string | null;
 };
 
+export type ConversationDetail = ConversationPreview & {
+  members?: string[];
+  peer?: {
+    id: string;
+    username?: string;
+    phone?: string;
+    email?: string;
+    name?: string;
+    avatarUrl?: string | null;
+  } | null;
+};
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
   from: string;
   text: string;
   createdAt: string;
+  pending?: boolean;
+  failed?: boolean;
 };
 
 export async function listConversations(limit = 50): Promise<ConversationPreview[]> {
   const res = await api(`/api/conversations?limit=${limit}`, { auth: true, method: 'GET' });
   return (res?.items ?? res?.data?.items ?? []) as ConversationPreview[];
+}
+
+export async function getConversation(conversationId: string): Promise<ConversationDetail> {
+  const res = await api(`/api/conversations/${conversationId}`, { auth: true, method: 'GET' });
+  return (res?.data ?? res) as ConversationDetail;
 }
 
 export async function fetchMessages(conversationId: string, before?: string, limit = 50): Promise<ChatMessage[]> {
@@ -38,6 +57,10 @@ export async function sendMessage(conversationId: string, text: string): Promise
     body: { text },
   });
   return (res?.data ?? res) as ChatMessage;
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await api(`/api/conversations/${conversationId}`, { auth: true, method: 'DELETE' });
 }
 
 // Optional helper when you only have request+peer and no conversation yet

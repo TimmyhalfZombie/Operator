@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
-import { getCustomerDb } from '../db/connect';
+import { getAuthDb, getCustomerDb } from '../db/connect';
 import { requireAuth } from '../middleware/jwt';
 import { Conversation } from '../models/conversation';
 import { ConversationMeta } from '../models/conversationMeta';
@@ -11,12 +11,138 @@ const r = Router();
 
 function isValidOid(v: string | undefined | null): v is string { return !!v && Types.ObjectId.isValid(v); }
 
-/** List my conversations */
+/* ---------------- helpers: robust title resolution ---------------- */
+
+function pickFirstString(obj: any, paths: string[]): string | null {
+  for (const p of paths) {
+    const parts = p.split('.');
+    let cur: any = obj;
+    for (const k of parts) {
+      if (cur == null) { cur = undefined; break; }
+      cur = cur[k];
+    }
+    if (typeof cur === 'string' && cur.trim()) return cur.trim();
+  }
+  return null;
+}
+
+function deriveTitleFromAssist(assist: any): string | null {
+  if (!assist) return null;
+  // Try a bunch of common field names people use in assist/request docs
+  return (
+    pickFirstString(assist, [
+      'clientName',
+      'customerName',
+      'name',
+      'displayName',
+      'fullName',
+      'title',
+      'contact.name',
+      'profile.name',
+      'user.name',
+      'requesterName',
+    ]) || null
+  );
+}
+
+function deriveTitleFromUser(user: any): string | null {
+  if (!user) return null;
+  // Prefer explicit names, then username, then email/phone
+  const full =
+    pickFirstString(user, [
+      'name',
+      'displayName',
+      'fullName',
+      'firstname',
+      'firstName',
+      'given_name',
+    ]) &&
+    pickFirstString(user, ['lastname', 'lastName', 'family_name'])
+      ? `${pickFirstString(user, ['firstname','firstName','given_name'])} ${pickFirstString(user, ['lastname','lastName','family_name'])}`
+      : null;
+
+  return (
+    full ||
+    pickFirstString(user, [
+      'name',
+      'displayName',
+      'fullName',
+      'username',
+      'firstName',
+      'given_name',
+      'email',
+      'phone',
+    ]) ||
+    null
+  );
+}
+
+async function resolveTitleAndPeer(me: string, conv: any) {
+  const customerDb = getCustomerDb();
+  const authDb = getAuthDb();
+
+  const members = (conv?.members || []).map((m: any) => String(m));
+  const otherIdStr = members.find((m: string) => m !== String(me)) || null;
+
+  let title: string | null = conv?.title || null;
+  let peer: any = null;
+
+  // 1) Try requestId explicitly
+  if (!title && conv?.requestId) {
+    try {
+      const assist = await customerDb
+        .collection('assistrequests')
+        .findOne({ _id: conv.requestId as any });
+      title = deriveTitleFromAssist(assist);
+    } catch {}
+  }
+
+  // 2) Try latest assistrequest for this peer (if we have peer id)
+  if (!title && otherIdStr && isValidOid(otherIdStr)) {
+    try {
+      const assist = await customerDb
+        .collection('assistrequests')
+        .find({ userId: new Types.ObjectId(otherIdStr) })
+        .project({ clientName: 1, customerName: 1, name: 1, displayName: 1, fullName: 1, contact: 1, profile: 1, user: 1, requesterName: 1, createdAt: 1 } as any)
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .next();
+      title = deriveTitleFromAssist(assist);
+    } catch {}
+  }
+
+  // 3) Load peer record and use it for both peer info and title fallback
+  if (otherIdStr && isValidOid(otherIdStr)) {
+    try {
+      const u = await authDb
+        .collection('users')
+        .findOne(
+          { _id: new Types.ObjectId(otherIdStr) },
+          { projection: { username: 1, phone: 1, email: 1, name: 1, displayName: 1, fullName: 1, firstname: 1, firstName: 1, lastname: 1, lastName: 1, given_name: 1, family_name: 1, avatarUrl: 1 } as any }
+        );
+      const name = deriveTitleFromUser(u);
+      peer = {
+        id: otherIdStr,
+        username: u?.username ?? null,
+        phone: u?.phone ?? null,
+        email: u?.email ?? null,
+        name: name ?? null,
+        avatarUrl: u?.avatarUrl ?? null,
+      };
+      if (!title) title = name;
+    } catch {}
+  }
+
+  return { title: title || null, peer, members };
+}
+
+/* ---------------- list: previews (with better title) ---------------- */
+
 r.get('/', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   const limit = Math.min(Number(req.query.limit || 50), 200);
-  let pipeline: any[] = [];
 
+  let pipeline: any[] = [];
   if (isValidOid(me)) pipeline = [{ $match: { members: new Types.ObjectId(me) } }];
   else {
     pipeline = [
@@ -29,43 +155,87 @@ r.get('/', requireAuth as any, async (req: any, res) => {
     { $sort: { lastMessageAt: -1, updatedAt: -1 } },
     { $limit: limit },
     {
-      $lookup: {
-        from: 'conversationmetas',
-        let: { convId: '$_id' },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ['$conversationId', '$$convId'] },
-                  ...(isValidOid(me) ? [{ $eq: ['$userId', new Types.ObjectId(me)] }] : [{ $eq: [{ $toString: '$userId' }, me] }]),
-                ],
-              },
-            },
-          },
-          { $project: { unread: 1, lastReadAt: 1 } },
-        ],
-        as: 'meta',
-      },
-    },
-    { $unwind: { path: '$meta', preserveNullAndEmptyArrays: true } },
-    {
       $project: {
         id: { $toString: '$_id' },
-        title: 1,
+        _id: 1,
+        members: 1,
         requestId: 1,
+        title: 1,
         lastMessage: 1,
         lastMessageAt: 1,
-        unread: '$meta.unread',
       },
     }
   );
 
-  const items = await Conversation.aggregate(pipeline);
+  const raw = await Conversation.aggregate(pipeline);
+  const items = await Promise.all(
+    raw.map(async (c: any) => {
+      const { title } = await resolveTitleAndPeer(me, c);
+      // Load unread for me (best-effort)
+      let unread: number | null = null;
+      try {
+        const meta = await ConversationMeta.findOne(
+          isValidOid(me)
+            ? { conversationId: c._id, userId: new Types.ObjectId(me) }
+            // @ts-ignore optional userIdStr when present
+            : { conversationId: c._id, userIdStr: me }
+        ).lean();
+        unread = (meta as any)?.unread ?? null;
+      } catch {}
+      return {
+        id: String(c._id),
+        title: title || 'Conversation',
+        requestId: c.requestId ? String(c.requestId) : null,
+        lastMessage: c.lastMessage ?? null,
+        lastMessageAt: c.lastMessageAt ?? null,
+        unread,
+      };
+    })
+  );
+
   res.json({ items });
 });
 
-/** Get messages (ascending) */
+/* ---------------- detail: title + peer info ---------------- */
+
+r.get('/:id', requireAuth as any, async (req: any, res) => {
+  const me: string = String(req.user?.id || '');
+  const convId = String(req.params.id || '');
+  if (!isValidOid(convId)) return res.status(404).json({ error: 'not_found' });
+
+  const conv = await Conversation.findById(convId);
+  if (!conv) return res.status(404).json({ error: 'not_found' });
+  const members = (conv.members || []).map((m: any) => String(m));
+  if (!members.includes(me)) return res.status(404).json({ error: 'not_found' });
+
+  const { title, peer } = await resolveTitleAndPeer(me, conv);
+
+  // unread for me
+  let unread: number | null = null;
+  try {
+    const meta = await ConversationMeta.findOne(
+      isValidOid(me)
+        ? { conversationId: conv._id, userId: new Types.ObjectId(me) }
+        // @ts-ignore when schema allows
+        : { conversationId: conv._id, userIdStr: me }
+    ).lean();
+    unread = (meta as any)?.unread ?? null;
+  } catch {}
+
+  res.json({
+    id: String(conv._id),
+    requestId: conv.requestId ? String(conv.requestId) : null,
+    members,
+    title: title || 'Conversation',
+    peer,
+    lastMessage: (conv as any)?.lastMessage ?? null,
+    lastMessageAt: (conv as any)?.lastMessageAt ?? null,
+    unread,
+  });
+});
+
+/* ---------------- messages ---------------- */
+
 r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   const convId = String(req.params.id || '');
@@ -90,7 +260,6 @@ r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
     createdAt: (m.createdAt ?? new Date()).toISOString(),
   })).reverse();
 
-  // Mark as read (best-effort)
   const now = new Date();
   try {
     if (isValidOid(me)) {
@@ -99,15 +268,14 @@ r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
         { $set: { unread: 0, lastReadAt: now } },
         { upsert: true }
       );
-  } else {
-    await ConversationMeta.updateOne(
-      // @ts-ignore allow optional userIdStr when present in schema
-      { conversationId: conv._id, userIdStr: me },
-      // @ts-ignore allow optional userIdStr when present in schema
-      { $set: { unread: 0, lastReadAt: now, userIdStr: me } },
-      { upsert: true }
-    ).catch(() => void 0);
-  }
+    } else {
+      // @ts-ignore when schema allows userIdStr
+      await ConversationMeta.updateOne(
+        { conversationId: conv._id, userIdStr: me },
+        { $set: { unread: 0, lastReadAt: now, userIdStr: me } },
+        { upsert: true }
+      ).catch(() => void 0);
+    }
   } catch (e) {
     console.warn('[rest] mark read failed:', (e as Error).message);
   }
@@ -115,7 +283,8 @@ r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
   res.json({ items });
 });
 
-/** Ensure/get a conversation for a peer/request */
+/* ---------------- ensure conversation ---------------- */
+
 r.post('/ensure', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   let { peerUserId, requestId } = req.body as { peerUserId?: string; requestId?: string };
@@ -137,24 +306,26 @@ r.post('/ensure', requireAuth as any, async (req: any, res) => {
 
   const members = [new Types.ObjectId(me), new Types.ObjectId(peerUserId!)].sort();
   const q: any = { members: { $all: members, $size: 2 } };
-  if (requestId) {
-    if (!isValidOid(requestId)) return res.status(400).json({ message: 'requestId must be a valid ObjectId' });
-    q.requestId = new Types.ObjectId(requestId);
-  }
 
   let conv = await Conversation.findOne(q);
   if (!conv) {
+    if (requestId && !isValidOid(requestId)) {
+      return res.status(400).json({ message: 'requestId must be a valid ObjectId' });
+    }
     conv = await Conversation.create({
       members,
       requestId: requestId ? new Types.ObjectId(requestId) : undefined,
       lastMessageAt: new Date(),
     });
+  } else if (requestId && !conv.requestId && isValidOid(requestId)) {
+    await Conversation.updateOne({ _id: conv._id }, { $set: { requestId: new Types.ObjectId(requestId) } }).catch(() => void 0);
   }
 
   res.json({ id: String(conv._id) });
 });
 
-/** Send a message (REST) with native-DB fallback + broadcast */
+/* ---------------- send (REST) + broadcast ---------------- */
+
 r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   const convId = String(req.params.id || '');
@@ -169,35 +340,19 @@ r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
     if (!conv.members.map((m: any) => String(m)).includes(me)) return res.status(404).json({ error: 'not found' });
 
     const stamp = new Date();
-    let msg: any = null;
-
-    // Try mongoose
-    try {
-      const sender = isValidOid(me) ? new Types.ObjectId(me) : me;
-      msg = await Message.create({
-        conversationId: conv._id,   // ObjectId
-        senderId: sender,           // ObjectId or string if schema allows
-        content: text,
-        createdAt: stamp,
-      });
-      if (process.env.NODE_ENV !== 'production') console.log('[rest] mongoose insert OK:', String(msg._id));
-    } catch (e) {
-      console.error('[rest] mongoose insert failed, falling back to native:', (e as Error).message);
-      const db = await getCustomerDb();
-      const ins = await db.collection('messages').insertOne({
-        conversationId: conv._id,   // ObjectId
-        senderId: isValidOid(me) ? new Types.ObjectId(me) : me,
-        content: text,
-        createdAt: stamp,
-      });
-      msg = { _id: ins.insertedId, conversationId: conv._id, senderId: me, content: text, createdAt: stamp };
-    }
+    const sender = isValidOid(me) ? new Types.ObjectId(me) : me;
+    const msg = await Message.create({
+      conversationId: conv._id,
+      senderId: sender,
+      content: text,
+      createdAt: stamp,
+    });
 
     await Conversation.findByIdAndUpdate(conv._id, { lastMessage: text, lastMessageAt: stamp }).catch((e) =>
       console.warn('[rest] update conversation preview failed:', (e as Error).message)
     );
 
-  const others = conv.members.map((m: any) => String(m)).filter((id: string) => id !== me);
+    const others = conv.members.map((m: any) => String(m)).filter((id: string) => id !== me);
     await Promise.all(
       others.map(async (uid: string) => {
         try {
@@ -208,10 +363,9 @@ r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
               { upsert: true }
             );
           } else {
+            // @ts-ignore when schema allows userIdStr
             await ConversationMeta.updateOne(
-              // @ts-ignore allow optional userIdStr when present in schema
               { conversationId: conv._id, userIdStr: uid },
-              // @ts-ignore allow optional userIdStr when present in schema
               { $inc: { unread: 1 }, $setOnInsert: { userIdStr: uid } },
               { upsert: true }
             ).catch(() => void 0);
@@ -232,7 +386,6 @@ r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
 
     try {
       const io = getIO();
-      if (process.env.NODE_ENV !== 'production') console.log('[rest] broadcasting message:new', payload);
       io.to(`conv:${payload.conversationId}`).emit('message:new', payload);
     } catch {}
 
@@ -240,6 +393,36 @@ r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
   } catch (e: any) {
     console.error('[rest] message create failed:', e?.message || e);
     res.status(500).json({ error: 'insert_failed', detail: e?.message || String(e) });
+  }
+});
+
+/* ---------------- delete ---------------- */
+
+r.delete('/:id', requireAuth as any, async (req: any, res) => {
+  const me: string = String(req.user?.id || '');
+  const convId = String(req.params.id || '');
+  if (!isValidOid(convId)) return res.status(404).json({ error: 'not_found' });
+
+  try {
+    const conv = await Conversation.findById(convId);
+    if (!conv) return res.status(404).json({ error: 'not_found' });
+    const isMember = conv.members.map((m: any) => String(m)).includes(me);
+    if (!isMember) return res.status(403).json({ error: 'forbidden' });
+
+    const db = getCustomerDb();
+    await db.collection('messages').deleteMany({ conversationId: conv._id });
+    await db.collection('conversationmetas').deleteMany({ conversationId: conv._id });
+    await Conversation.deleteOne({ _id: conv._id });
+
+    try {
+      const io = getIO();
+      io.to(`conv:${convId}`).emit('conversation:deleted', { id: convId });
+    } catch {}
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[rest] delete conversation failed:', (e as Error).message);
+    res.status(500).json({ error: 'delete_failed' });
   }
 });
 

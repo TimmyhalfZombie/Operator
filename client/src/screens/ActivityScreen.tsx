@@ -1,6 +1,5 @@
-import { router } from 'expo-router';
 import * as Icons from 'phosphor-react-native';
-import React, { useMemo } from 'react';
+import React from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -9,33 +8,10 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useActivity } from '../features/useActivity';
 import { useImmersiveMode } from '../hooks/useImmersiveMode';
+import { formatWhen, resolveRequestId, useActivityScreen } from './functions/activity';
 
-// Prefer a real request id; fall back through common shapes.
-function resolveRequestId(x: any) {
-  return (
-    x?.id ??
-    x?._id ??
-    x?.requestId ??
-    x?.assistId ??
-    x?.assistanceId ??
-    x?.request?.id ??
-    x?.request?._id ??
-    null
-  );
-}
-
-// If your backend has a separate "activity id", try to capture it too.
-function resolveActivityId(x: any) {
-  return (
-    x?.activityId ??
-    x?.activity?.id ??
-    x?.id ??     // sometimes the row id itself is the activity id
-    x?._id ??
-    null
-  );
-}
+// helpers moved to ./functions/activity
 
 const BG = '#121212';
 const TEXT = '#EDEDED';
@@ -103,26 +79,11 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
   );
 };
 
-function formatWhen(dt: string | Date) {
-  const d = new Date(dt);
-  const opts: Intl.DateTimeFormatOptions = {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  };
-  return new Intl.DateTimeFormat(undefined, opts).format(d);
-}
+// formatWhen moved to ./functions/activity
 
 const ActivityScreen: React.FC = () => {
   useImmersiveMode();
-  const { newItems, recentItems, loading, error } = useActivity();
-
-  const empty = useMemo(
-    () => !loading && !error && newItems.length === 0 && recentItems.length === 0,
-    [loading, error, newItems.length, recentItems.length]
-  );
+  const { newItems, recentItems, loading, error, empty, onPressNew, onPressRecent } = useActivityScreen();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -160,7 +121,7 @@ const ActivityScreen: React.FC = () => {
                           isNew
                           title={title}
                           subtitle={formatWhen(it.createdAt)}
-                          onPress={() => router.push('/assist')}
+                          onPress={onPressNew}
                         />
                         {idx < newItems.length - 1 && <View style={styles.divider} />}
                       </React.Fragment>
@@ -175,38 +136,19 @@ const ActivityScreen: React.FC = () => {
             <View style={styles.card}>
               {recentItems.map((it, idx) => {
                 const clientName = it?.clientName || it?.customerName || it?.contactName || 'Client';
-                const vehicleModel = it?.vehicle?.model || it?.vehicleType || 'Vehicle';
+                const vehicleModel = it?.vehicle?.model || (it as any)?.vehicleType || 'Vehicle';
                 const clientLocation =
                   it?.location?.address ||
                   it?.location?.formatted_address ||
                   it?.location?.display_name ||
-                  it?.address ||
+                  (it as any)?.address ||
                   'Location';
                 const date = formatWhen(it.createdAt);
 
                 const title = clientName;
                 const subtitle = `${vehicleModel}\n${clientLocation}\n${date}`;
 
-                const onPress = () => {
-                  const rid = resolveRequestId(it);
-                  const aid = resolveActivityId(it);
-
-                  // keep snapshot small (prefer _raw if present)
-                  let snapSrc: any = it?._raw ?? it;
-                  // strip very heavy fields if any
-                  const { image, photo, ...rest } = snapSrc || {};
-                  const snap = encodeURIComponent(JSON.stringify(rest || {}));
-
-                  const qs = new URLSearchParams();
-                  if (rid) qs.set('id', String(rid));
-                  if (aid && String(aid) !== String(rid)) qs.set('activityId', String(aid));
-                  qs.set('snap', snap);
-
-                  const url = `/activity-detail?${qs.toString()}`;
-                  console.log('[RecentActivity] push detail with', { rid, aid, url });
-
-                  router.push(url);
-                };
+                const onPress = () => onPressRecent(it);
 
 
                 return (

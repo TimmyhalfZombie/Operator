@@ -74,7 +74,10 @@ export function useNextAssist() {
       const id = explicitId ?? data?.id;
       if (!id) throw new Error('Missing request id');
       try {
-        await acceptAssist(id);
+        const { conversationId } = await acceptAssist(id);
+        if (conversationId) {
+          router.push({ pathname: '/chat/[id]', params: { id: conversationId } });
+        }
       } catch (e: any) {
         const msg = String(e?.message || '');
         if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('not pending')) {

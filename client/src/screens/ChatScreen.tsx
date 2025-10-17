@@ -1,31 +1,21 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import {
-    ActivityIndicator,
-    FlatList,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  BackHandler,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { tokens } from '../auth/tokenStore';
 import { useChat } from '../features/messages/useChat';
-
-// Try to extract the current user's id from your token store.
-// Adjust these fallbacks to match what you actually save.
-function getMyId(): string {
-  return (
-    (tokens as any).userId ||
-    (tokens as any).user?.id ||
-    (tokens as any).profile?.id ||
-    (tokens as any).sub ||
-    (tokens as any).id ||
-    'me'
-  );
-}
+import { getMyIdSync, isMyMessage, useResolvedConversationId } from './functions/chat';
+import { getConversation } from '@/features/messages/api';
 
 const BG = '#121212';
 const CARD = '#1c1c1c';
@@ -34,15 +24,58 @@ const BORDER = '#262626';
 const DIM = '#9AA09C';
 
 export default function ChatScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const myId = React.useMemo(getMyId, []);
-  const { messages, loading, send, setIsTyping } = useChat(id, myId);
+  const { id: idParam, requestId, peer } = useLocalSearchParams<{ id?: string; requestId?: string; peer?: string }>();
+  const [myId, setMyId] = React.useState<string>('me');
+  const [title, setTitle] = React.useState<string>('Conversation');
 
+  React.useEffect(() => {
+    (async () => {
+      try { await (tokens as any).waitUntilReady?.(); } catch {}
+      setMyId(getMyIdSync());
+    })();
+  }, []);
+
+  // Always go back to Messages tab (also for Android hardware back)
+  React.useEffect(() => {
+    const onBack = () => { router.replace('/messages'); return true; };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => { sub.remove(); };
+  }, []);
+
+  const convId = useResolvedConversationId(
+    typeof idParam === 'string' ? idParam : undefined,
+    typeof requestId === 'string' ? requestId : undefined,
+    typeof peer === 'string' ? peer : undefined
+  );
+
+  // Load conversation title/peer for header
+  React.useEffect(() => {
+    let live = true;
+    (async () => {
+      if (!convId) return;
+      try {
+        const d = await getConversation(convId);
+        const t =
+          d?.title ||
+          d?.peer?.name ||
+          d?.peer?.username ||
+          d?.peer?.phone ||
+          d?.peer?.email ||
+          'Conversation';
+        if (live) setTitle(String(t));
+      } catch {
+        if (live) setTitle('Conversation');
+      }
+    })();
+    return () => { live = false; };
+  }, [convId]);
+
+  const { messages, loading, send, setIsTyping } = useChat(convId, myId);
   const [text, setText] = React.useState('');
 
   const onSend = () => {
     const t = text.trim();
-    if (!t) return;
+    if (!t || !convId) return;
     send(t);
     setText('');
   };
@@ -55,11 +88,11 @@ export default function ChatScreen() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+        <TouchableOpacity onPress={() => router.replace('/messages')} style={styles.headerBtn}>
           <Text style={{ color: DIM }}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>
-          Chat
+          {title}
         </Text>
         <View style={styles.headerBtn} />
       </View>
@@ -75,24 +108,15 @@ export default function ChatScreen() {
           keyExtractor={(m, i) => m.id || String(i)}
           contentContainerStyle={{ padding: 12, paddingBottom: 16, flexGrow: 1, justifyContent: 'flex-end' }}
           renderItem={({ item }) => {
-            const mine = item.from === myId;
+            type RenderMessage = typeof item & { pending?: boolean; failed?: boolean };
+            const m = item as RenderMessage;
+            const mine = isMyMessage(m.from, myId);
             return (
-              <View
-                style={[
-                  styles.row,
-                  mine ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.bubble,
-                    mine ? styles.bubbleMine : styles.bubbleOther,
-                    item.failed && styles.bubbleFailed,
-                  ]}
-                >
-                  <Text style={mine ? styles.textMine : styles.textOther}>{item.text}</Text>
-                  {item.pending && <Text style={styles.meta}>sending…</Text>}
-                  {item.failed && <Text style={styles.meta}>failed</Text>}
+              <View style={[styles.row, mine ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' }]}>
+                <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther, m.failed && styles.bubbleFailed]}>
+                  <Text style={mine ? styles.textMine : styles.textOther}>{m.text}</Text>
+                  {m.pending && <Text style={styles.meta}>sending…</Text>}
+                  {m.failed && <Text style={styles.meta}>failed</Text>}
                 </View>
               </View>
             );
@@ -130,23 +154,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
-    height: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: BORDER,
+    height: 56, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER,
   },
   headerBtn: { width: 60, paddingVertical: 8 },
   title: { flex: 1, textAlign: 'center', color: '#EDEDED', fontSize: 16, fontWeight: '700' },
 
   row: { flexDirection: 'row', marginVertical: 6 },
-  bubble: {
-    maxWidth: '78%',
-    borderRadius: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
+  bubble: { maxWidth: '78%', borderRadius: 16, paddingVertical: 8, paddingHorizontal: 12 },
   bubbleMine: { backgroundColor: GREEN },
   bubbleOther: { backgroundColor: CARD, borderWidth: StyleSheet.hairlineWidth, borderColor: '#2A2A2A' },
   bubbleFailed: { borderColor: '#ff6464', borderWidth: 1 },
@@ -155,26 +170,12 @@ const styles = StyleSheet.create({
   meta: { color: DIM, fontSize: 11, marginTop: 4 },
 
   composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    padding: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BORDER,
+    flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER,
   },
   input: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 140,
-    padding: 10,
-    color: '#EDEDED',
-    backgroundColor: '#191919',
-    borderRadius: 12,
+    flex: 1, minHeight: 40, maxHeight: 140, padding: 10,
+    color: '#EDEDED', backgroundColor: '#191919', borderRadius: 12,
   },
-  sendBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: GREEN,
-  },
+  sendBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: GREEN },
 });

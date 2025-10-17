@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { deleteConversation } from '../features/messages/api';
 import { useConversations } from '../features/messages/useConversations';
 
 const BG = '#0E0E0E';
@@ -30,6 +31,28 @@ export default function MessagesScreen() {
     router.push({ pathname: '/chat/[id]', params: { id: item.id } });
   };
 
+  const handleConversationLongPress = (item: any) => {
+    Alert.alert(
+      'Delete',
+      undefined,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteConversation(item.id);
+              await reload();
+            } catch (e) {
+              Alert.alert('Delete failed', String((e as any)?.message || e));
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <View style={styles.safe}>
       <View style={styles.header}>
@@ -52,7 +75,7 @@ export default function MessagesScreen() {
           contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item }) => (
-            <TouchableOpacity onPress={() => handleConversationPress(item)} style={styles.row} activeOpacity={0.8}>
+            <TouchableOpacity onPress={() => handleConversationPress(item)} onLongPress={() => handleConversationLongPress(item)} style={styles.row} activeOpacity={0.8}>
               <View style={styles.avatar} />
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>

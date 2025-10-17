@@ -24,7 +24,7 @@ export function useActivity() {
     try {
       const data = await fetchOperatorInbox({ limit: 100 });
       setItems(data);
-      try { console.log('[useActivity] fetched inbox items:', Array.isArray(data) ? data.length : 0); } catch {}
+      // removed noisy debug log
       if (!silent) setError(null);
     } catch (e) {
       if (!silent) {

@@ -49,10 +49,11 @@ export async function fetchNextAssist(): Promise<AssistanceRequest | null> {
   return normalize(raw);
 }
 
-/** Accept a specific request by id. */
-export async function acceptAssist(id: string): Promise<void> {
+/** Accept a specific request by id. Returns conversationId if created/ensured. */
+export async function acceptAssist(id: string): Promise<{ conversationId?: string; autoMessageSent?: boolean }> {
   try {
-    await api(`/api/assist/${id}/accept`, { method: 'POST', auth: true });
+    const res = await api(`/api/assist/${id}/accept`, { method: 'POST', auth: true });
+    return (res?.data ?? res) as { conversationId?: string; autoMessageSent?: boolean };
   } catch (e: any) {
     const msg = String(e?.message || '');
     if (/not\s*pending|not\s*found|404|409/i.test(msg)) {
