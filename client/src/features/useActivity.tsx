@@ -24,6 +24,7 @@ export function useActivity() {
     try {
       const data = await fetchOperatorInbox({ limit: 100 });
       setItems(data);
+      try { console.log('[useActivity] fetched inbox items:', Array.isArray(data) ? data.length : 0); } catch {}
       if (!silent) setError(null);
     } catch (e) {
       if (!silent) {
@@ -84,8 +85,7 @@ export function useActivity() {
   );
   const recentItems = useMemo(() => 
     items.filter(i => 
-      (i.status || 'pending') !== 'pending' && 
-      (i.status || 'pending') !== 'declined' &&
+      (i.status || 'pending') !== 'pending' &&
       !declinedIds.has(i.id)
     ), [items, declinedIds]
   );

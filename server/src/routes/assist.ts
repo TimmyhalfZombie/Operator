@@ -148,9 +148,8 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 200);
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-
-    const db = getCustomerDb();
-    const coll = db.collection('assistrequests');
+    const customerDb = getCustomerDb();
+    const coll = customerDb.collection('assistrequests');
 
     const query: any = {};
     if (status) query.status = status;
@@ -174,6 +173,8 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
           clientName: 1,
           contactName: 1,
           customerPhone: 1,
+          acceptedBy: 1,
+          completedBy: 1,
         },
       })
       .toArray();
@@ -185,7 +186,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       // For completed requests, show the operator who completed it
       if (d.status === 'completed' && d.completedBy) {
         try {
-          const operator = await db.collection('operators').findOne({ user_id: String(d.completedBy) });
+          const operator = await customerDb.collection('operators').findOne({ user_id: String(d.completedBy) });
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
@@ -207,7 +208,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       else if (d.assignedTo || d.acceptedBy) {
         try {
           const operatorId = d.assignedTo || d.acceptedBy;
-          const operator = await db.collection('operators').findOne({ user_id: String(operatorId) });
+          const operator = await customerDb.collection('operators').findOne({ user_id: String(operatorId) });
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;

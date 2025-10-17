@@ -120,6 +120,7 @@ export async function resolveApiBaseUrl(): Promise<string> {
 				const ok = await probeBase(cached, new AbortController().signal);
 				if (ok) {
 					inMemoryBaseUrl = cached;
+					try { console.log('[serverDiscovery] Using cached API base URL:', inMemoryBaseUrl); } catch {}
 					return cached;
 				}
 			}
@@ -140,6 +141,7 @@ export async function resolveApiBaseUrl(): Promise<string> {
 				if (ok) {
 					inMemoryBaseUrl = base.replace(/\/$/, '');
                     await SecureStore.setItemAsync(STORAGE_KEY, inMemoryBaseUrl);
+					try { console.log('[serverDiscovery] Resolved API base URL:', inMemoryBaseUrl); } catch {}
 					return inMemoryBaseUrl;
 				}
 			} catch {}
@@ -152,6 +154,7 @@ export async function resolveApiBaseUrl(): Promise<string> {
             if (found) {
                 inMemoryBaseUrl = found;
                 await SecureStore.setItemAsync(STORAGE_KEY, inMemoryBaseUrl);
+				try { console.log('[serverDiscovery] Resolved API base URL via LAN scan:', inMemoryBaseUrl); } catch {}
                 return inMemoryBaseUrl;
             }
         }

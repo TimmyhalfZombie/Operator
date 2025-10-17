@@ -1,7 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-
-const API = process.env.EXPO_PUBLIC_API_URL as string;
-if (!API) throw new Error('Missing EXPO_PUBLIC_API_URL');
+import { resolveApiBaseUrl } from '../../../lib/serverDiscovery';
 
 const TOKEN_KEY = 'auth_token';
 let inMemoryToken: string | null = null;
@@ -30,7 +28,8 @@ function headers(json = true): HeadersInit {
 }
 
 export async function httpPost<T = any>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(`${API}${path}`, {
+  const base = await resolveApiBaseUrl();
+  const r = await fetch(`${base.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`, {
     method: 'POST',
     headers: headers(true),
     body: JSON.stringify(body),
@@ -41,7 +40,8 @@ export async function httpPost<T = any>(path: string, body: unknown): Promise<T>
 }
 
 export async function httpGet<T = any>(path: string): Promise<T> {
-  const r = await fetch(`${API}${path}`, { headers: headers(false) });
+  const base = await resolveApiBaseUrl();
+  const r = await fetch(`${base.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`, { headers: headers(false) });
   const text = await r.text();
   if (!r.ok) throw new Error(text || `HTTP ${r.status}`);
   return text ? JSON.parse(text) : ({} as any);

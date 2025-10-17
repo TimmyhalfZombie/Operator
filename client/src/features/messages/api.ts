@@ -1,3 +1,4 @@
+// CLIENT-SIDE API WRAPPER (no mongoose imports here)
 import { api } from '../../lib/http';
 
 export type ConversationPreview = {
@@ -10,15 +11,11 @@ export type ConversationPreview = {
 };
 
 export type ChatMessage = {
-  id: string;                 // real id or a temp id like "tmp_xxx"
+  id: string;
   conversationId: string;
-  from: string;               // userId of sender
-  text: string;               // message body
-  createdAt: string;          // ISO timestamp
-  // Client-only flags for UX
-  tempId?: string;
-  pending?: boolean;
-  failed?: boolean;
+  from: string;
+  text: string;
+  createdAt: string;
 };
 
 export async function listConversations(limit = 50): Promise<ConversationPreview[]> {
@@ -43,7 +40,7 @@ export async function sendMessage(conversationId: string, text: string): Promise
   return (res?.data ?? res) as ChatMessage;
 }
 
-/** Optional helper when you only have request+peer and no conversation yet */
+// Optional helper when you only have request+peer and no conversation yet
 export async function ensureConversation(peerUserId: string, requestId?: string): Promise<{ id: string }> {
   const res = await api(`/api/conversations/ensure`, {
     auth: true,

@@ -174,16 +174,7 @@ export default function ActivityDetailScreen() {
                             'Location unknown';
     const requestReceivedTime = doc?.createdAt ? new Date(doc.createdAt).toLocaleString() : 'Unknown time';
     
-    // Debug: Log the operator data to see what we're getting
-    console.log('Full doc data:', doc);
-    console.log('Operator data:', doc?.operator);
-    console.log('Raw operator data:', doc?._raw?.operator);
-    console.log('Operator initial_address:', doc?.operator?.initial_address);
-    console.log('Operator location:', doc?.operator?.location);
-    console.log('Raw initial_address:', doc?._raw?.operator?.initial_address);
-    console.log('Raw location:', doc?._raw?.operator?.location);
-    console.log('Final operator location:', operatorLocation);
-    console.log('Request received time:', requestReceivedTime);
+    // Debug logs removed to avoid spamming the console during auto-refresh
 
     if (doc?.operator) {
       const operatorName = doc.operator.name || 'Operator';

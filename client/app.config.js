@@ -48,7 +48,7 @@ module.exports = ({ config }) => ({
 
   extra: {
     router: {},
-    API_URL: process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.62:3000',
+    API_URL: process.env.EXPO_PUBLIC_API_URL,
     GEOAPIFY_KEY: process.env.EXPO_PUBLIC_GEOAPIFY_KEY || '',
     eas: { projectId: '7c38d5e4-763b-4d6c-b934-6ae6cd0a86f5' },
   },
@@ -98,5 +98,4 @@ module.exports = ({ config }) => ({
     softwareKeyboardLayoutMode: 'pan',
   },
 
-  // ❌ Removed the "web" block entirely
 });
