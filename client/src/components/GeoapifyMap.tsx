@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import React from 'react';
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { GEOAPIFY_KEY } from '../constants/geo';
-// import UserPin from './ClientPin';
+import UserPin from './ClientPin';
 
 type Props = {
   /** Client/customer latitude */
@@ -224,15 +224,13 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
           </MapLibreGL.ShapeSource>
         )}
 
-        {/* Client pin (blue) */}
+        {/* Client pin (blue pulsing) */}
         <MapLibreGL.MarkerView
           id="client-pin"
           coordinate={clientCenter}
           anchor={{ x: 0.5, y: 1.0 }}
         >
-          <View style={styles.clientPin}>
-            <View style={styles.clientPinInner} />
-          </View>
+          <UserPin />
         </MapLibreGL.MarkerView>
 
         {/* Operator pin (green) from appdb */}
@@ -268,25 +266,6 @@ const styles = StyleSheet.create({
   // (Only used when lat/lng are missing)
   placeholder: { alignItems: 'center', justifyContent: 'center' },
   placeholderText: { color: '#aaa' },
-
-  // Client pin (blue dot with white ring)
-  clientPin: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#0A84FF',
-    borderWidth: 3,
-    borderColor: 'white',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clientPinInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'white',
-    opacity: 0.8,
-  },
 
   // Operator pin (simple green dot with white ring)
   operatorDotOuter: {
