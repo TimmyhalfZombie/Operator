@@ -51,7 +51,12 @@ function toTitle(s: string) {
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
-export default function CurvedTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+// 🔹 Extend props to accept optional badges (e.g., { activity: true })
+type CurvedProps = BottomTabBarProps & {
+  badges?: Record<string, boolean | number>;
+};
+
+export default function CurvedTabBar({ state, descriptors, navigation, badges }: CurvedProps) {
   const routes = useMemo(() => state.routes.filter((r) => SAFE_TABS.has(r.name)), [state.routes]);
 
   const [width, setWidth] = useState<number>(SCREEN_WIDTH);
@@ -284,6 +289,12 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
                 IconComp = Icons.Circle;
             }
 
+            // 🔹 Simple boolean/number badge check
+            const showBadge =
+              route.name === "activity" &&
+              !isFocused &&
+              !!(badges && (badges["activity"] === true || Number(badges["activity"]) > 0));
+
             return (
               <TouchableOpacity
                 key={route.key}
@@ -296,9 +307,14 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
                 testID={options.tabBarTestID}
               >
                 <View style={styles.tabInner}>
+                  {/* Icon + optional green dot */}
                   <View style={{ opacity: isFocused ? 0 : 1 }}>
-                    <IconComp size={24} color={INACTIVE_TEXT} />
+                    <View style={styles.iconWrap}>
+                      <IconComp size={24} color={INACTIVE_TEXT} />
+                      {showBadge ? <View style={styles.badgeDot} /> : null}
+                    </View>
                   </View>
+
                   <Text style={[styles.label, isFocused && styles.labelActive]}>
                     {label}
                   </Text>
@@ -336,5 +352,25 @@ const styles = StyleSheet.create({
     backgroundColor: ACTIVE_GREEN,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  // 🔹 Badge helpers
+  iconWrap: {
+    position: "relative",
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeDot: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    width: 9,
+    height: 9,
+    borderRadius: 6,
+    backgroundColor: ACTIVE_GREEN,
+    borderWidth: 1,
+    borderColor: BG,
   },
 });

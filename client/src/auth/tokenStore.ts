@@ -60,8 +60,6 @@ async function ensureLoaded(): Promise<void> {
   return inFlight;
 }
 
-void ensureLoaded(); // prime
-
 async function persistCurrent(): Promise<void> {
   if (accessToken || refreshToken) {
     await SecureStore.setItemAsync(
@@ -70,6 +68,40 @@ async function persistCurrent(): Promise<void> {
     );
   } else {
     await SecureStore.deleteItemAsync(STORAGE_KEY);
+  }
+}
+
+// --- lightweight JWT decoder (no verification, UI-only) --- //
+function base64UrlDecode(input: string): string {
+  try {
+    const b64 = input.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 ? 4 - (b64.length % 4) : 0;
+    const padded = b64 + '='.repeat(pad);
+    if (typeof atob === 'function') {
+      // @ts-ignore atob might exist in RN Hermes
+      return decodeURIComponent(
+        Array.prototype.map
+          .call(atob(padded), (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+    } else {
+      // Fallback for RN: Buffer is usually available
+      // @ts-ignore
+      return Buffer.from(padded, 'base64').toString('utf8');
+    }
+  } catch {
+    return '';
+  }
+}
+function decodeJwtPayload<T = any>(jwt?: string | null): T | null {
+  if (!jwt) return null;
+  const parts = jwt.split('.');
+  if (parts.length < 2) return null;
+  const json = base64UrlDecode(parts[1]);
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return null;
   }
 }
 
@@ -102,4 +134,19 @@ export const tokens = {
 
   waitUntilReady: ensureLoaded,
   isReady() { return ready; },
+
+  // 🔹 UI helpers: read user id/name from the access token
+  async getUserIdAsync(): Promise<string | null> {
+    await ensureLoaded();
+    const payload = decodeJwtPayload<any>(accessToken);
+    // server (per your stack) signs payload with { id, name, email, phone, avatar }
+    const id = payload?.id ?? payload?.sub ?? null;
+    return id ? String(id) : null;
+  },
+  async getUserNameAsync(): Promise<string | null> {
+    await ensureLoaded();
+    const payload = decodeJwtPayload<any>(accessToken);
+    const name = payload?.name ?? null;
+    return name ? String(name) : null;
+  },
 };

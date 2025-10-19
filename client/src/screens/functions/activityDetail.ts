@@ -3,7 +3,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import { AppState } from 'react-native';
 import { getAssistByAnyId } from '../../features/assistance/api';
-import { ensureConversation } from '../../features/messages/api';
 import { getCompletedByAnyId } from '../../lib/completedCache';
 
 export function fmtRange(a?: string, b?: string) {
@@ -202,7 +201,7 @@ export function useActivityDetail() {
     try {
       if (!doc) return;
       setMsgBusy(true);
-      // Try to derive the peer (customer) user id from common fields
+      // Always navigate immediately; let ChatScreen resolve/create the conversation
       const peerUserId =
         doc?.customerId ||
         doc?.clientId ||
@@ -210,19 +209,8 @@ export function useActivityDetail() {
         doc?.user?._id ||
         doc?.client?._id ||
         doc?.customer?._id ||
-        null;
-      // If peer id is missing, navigate to ChatScreen and let it ensure using requestId
-      if (!peerUserId) {
-        router.push({ pathname: '/chat/[id]', params: { id: 'new', requestId: String(requestId) } });
-        return;
-      }
-      const ensured = await ensureConversation(String(peerUserId), requestId ? String(requestId) : undefined).catch(() => null);
-      if (ensured?.id) {
-        router.push({ pathname: '/chat/[id]', params: { id: ensured.id } });
-      } else {
-        // Fallback: navigate and let ChatScreen ensure
-        router.push({ pathname: '/chat/[id]', params: { id: 'new', requestId: String(requestId), peer: String(peerUserId) } });
-      }
+        undefined;
+      router.push({ pathname: '/chat/[id]', params: { id: 'new', requestId: String(requestId), ...(peerUserId ? { peer: String(peerUserId) } : {}) } });
     } catch (e) {
       // eslint-disable-next-line no-console
       console.log('handleMessagePress error:', e);

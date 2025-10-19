@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { Types } from 'mongoose';
 import { getCustomerDb } from '../db/connect';
 import { requireAuth } from '../middleware/jwt';
+import { getIO } from '../socket'; // best-effort: if socket exists we'll emit
 
 const router = Router();
 
@@ -547,6 +548,7 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
     const db = getCustomerDb();
     const coll = db.collection('assistrequests');
 
+    // 1) Mark request as accepted
     const result = await coll.findOneAndUpdate(
       { _id: new ObjectId(id), status: 'pending' },
       {
@@ -559,53 +561,83 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
       { returnDocument: 'after' }
     );
 
-    if (!result || !result.value) return res.status(404).json({ message: 'Request not found or not pending' });
-
-    // Create a conversation between the operator and client
-    const doc = result.value;
-    const operatorId = new Types.ObjectId((req as any).user.id);
-    const clientUserId = doc.userId ? new Types.ObjectId(doc.userId) : null;
-    
-    console.log('Creating conversation for request:', id);
-    console.log('Operator ID:', (req as any).user.id);
-    console.log('Client User ID:', doc.userId);
-    console.log('Client User ID ObjectId:', clientUserId);
-    
-    if (clientUserId) {
-      try {
-        const conversationsColl = db.collection('conversations');
-        const members = [operatorId, clientUserId].sort();
-        
-        // Check if conversation already exists
-        let conversation = await conversationsColl.findOne({
-          members: { $all: members, $size: 2 },
-          requestId: new Types.ObjectId(id)
-        });
-        
-        console.log('Existing conversation:', conversation);
-        
-        // Create conversation if it doesn't exist
-        if (!conversation) {
-          const insertResult = await conversationsColl.insertOne({
-            members,
-            requestId: new Types.ObjectId(id),
-            lastMessageAt: new Date(),
-            createdAt: new Date(),
-            updatedAt: new Date()
-          });
-          console.log('Created conversation with ID:', insertResult.insertedId);
-        } else {
-          console.log('Conversation already exists with ID:', conversation._id);
-        }
-      } catch (convError) {
-        console.log('Error creating conversation:', convError);
-        // Don't fail the accept if conversation creation fails
-      }
-    } else {
-      console.log('No client userId found, skipping conversation creation');
+    if (!result || !result.value) {
+      return res.status(404).json({ message: 'Request not found or not pending' });
     }
 
-    res.json({ ok: true });
+    // 2) Ensure a single shared conversation between operator and client
+    const doc = result.value as any;
+    const operatorId = new Types.ObjectId((req as any).user.id);
+    const clientUserId = doc.userId ? new Types.ObjectId(doc.userId) : null;
+
+    let conversationId: string | undefined;
+
+    if (clientUserId) {
+      const conversationsColl = db.collection('conversations');
+      const metasColl = db.collection('conversationmetas');
+
+      // canonical hash for pair uniqueness (works even without schema changes)
+      const participantsHash = [String(operatorId), String(clientUserId)].sort().join(':');
+
+      // upsert the conversation by participantsHash; also link requestId
+      const conv = await conversationsColl.findOneAndUpdate(
+        { participantsHash },
+        {
+          $setOnInsert: {
+            members: [operatorId, clientUserId], // store as ObjectIds
+            createdAt: new Date(),
+          },
+          $set: {
+            requestId: new ObjectId(id),
+            updatedAt: new Date(),
+          },
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+
+      conversationId = String(conv.value?._id);
+
+      // Ensure ConversationMeta for both sides (unread counters exist)
+      const metaOps = [
+        {
+          updateOne: {
+            filter: { conversationId: conv.value!._id, userId: operatorId },
+            update: { $setOnInsert: { unread: 0 } },
+            upsert: true,
+          },
+        },
+        {
+          updateOne: {
+            filter: { conversationId: conv.value!._id, userId: clientUserId },
+            update: { $setOnInsert: { unread: 0 } },
+            upsert: true,
+          },
+        },
+      ];
+      try {
+        await metasColl.bulkWrite(metaOps as any, { ordered: false });
+      } catch {
+        // ignore best-effort
+      }
+
+      // 3) Notify the client app with the shared conversationId (if socket available)
+      try {
+        const io = getIO();
+        const clientRoom = `user:${String(clientUserId)}`; // requires your socket server to join this room on connect
+        io.to(clientRoom).emit('assist:approved', {
+          requestId: String(id),
+          conversationId,
+          operator: {
+            id: String(operatorId),
+          },
+        });
+      } catch {
+        // socket not initialized or client offline; that's fine
+      }
+    }
+
+    // 4) Return the conversationId to the operator
+    return res.json({ ok: true, conversationId });
   } catch (e) {
     next(e);
   }

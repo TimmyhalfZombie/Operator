@@ -15,6 +15,9 @@ export function getIO(): Server {
   return ioRef;
 }
 
+const userRoom = (userId: string) => `user:${userId}`;
+const convRoom = (id: string) => `conv:${id}`;
+
 export function initSocket(httpServer: HTTPServer) {
   const io = new Server(httpServer, {
     path: '/socket.io',
@@ -40,11 +43,11 @@ export function initSocket(httpServer: HTTPServer) {
 
   io.on('connection', async (socket: Socket) => {
     const me = (socket as any).user as JwtUser;
-    const roomKey = (id: string) => `conv:${id}`;
-    const joinRoom = (id?: string) => id && socket.join(roomKey(String(id)));
-    const leaveRoom = (id?: string) => id && socket.leave(roomKey(String(id)));
 
-    // Auto-join my conv rooms (best-effort)
+    // Join personal user room so server can target me directly.
+    socket.join(userRoom(me.id));
+
+    // Auto-join all my conversation rooms
     try {
       let convIds: string[] = [];
       if (Types.ObjectId.isValid(me.id)) {
@@ -58,23 +61,113 @@ export function initSocket(httpServer: HTTPServer) {
         ]);
         convIds = agg.map((c: any) => String(c._id));
       }
-      convIds.forEach((id) => socket.join(roomKey(id)));
+      convIds.forEach((id) => socket.join(convRoom(id)));
       if (process.env.NODE_ENV !== 'production') console.log('[socket] joined rooms:', convIds);
     } catch (e) {
       console.warn('[socket] auto-join failed:', (e as Error).message);
     }
 
-    socket.on('conversation:join', (p: any) => joinRoom(p?.conversationId || p?.id));
-    socket.on('join:conv', (id: string) => joinRoom(id));
-    socket.on('join', (p: any) => joinRoom(p?.room || p?.conversationId || p?.id));
+    const joinAny = (id?: string) => id && socket.join(convRoom(String(id)));
+    const leaveAny = (id?: string) => id && socket.leave(convRoom(String(id)));
 
-    socket.on('conversation:leave', (p: any) => leaveRoom(p?.conversationId || p?.id));
-    socket.on('leave:conv', (id: string) => leaveRoom(id));
-    socket.on('leave', (p: any) => leaveRoom(p?.room || p?.conversationId || p?.id));
+    socket.on('conversation:join', (p: any) => joinAny(p?.conversationId || p?.id));
+    socket.on('join:conv', (id: string) => joinAny(id));
+    socket.on('join', (p: any) => joinAny(p?.room || p?.conversationId || p?.id));
+
+    socket.on('conversation:leave', (p: any) => leaveAny(p?.conversationId || p?.id));
+    socket.on('leave:conv', (id: string) => leaveAny(id));
+    socket.on('leave', (p: any) => leaveAny(p?.room || p?.conversationId || p?.id));
 
     socket.on('typing', ({ conversationId, isTyping }: { conversationId: string; isTyping: boolean }) => {
       if (!conversationId) return;
-      socket.to(roomKey(conversationId)).emit('typing', { userId: me.id, isTyping: !!isTyping });
+      socket.to(convRoom(conversationId)).emit('typing', { userId: me.id, isTyping: !!isTyping });
+    });
+
+    /* ----------------------------------------------------------
+     * NEW: create/find a conversation via socket ("newConversation")
+     * Supports:
+     *  - direct: { type: "direct", participants: [me, otherId], name?, avatar? }
+     *  - group:  { type: "group",  participants: [me, ...],     name?, avatar? }
+     * Replies by emitting "newConversation" with { success, data?, msg? }
+     * ---------------------------------------------------------- */
+    socket.on('newConversation', async (payload: any) => {
+      try {
+        const type = (payload?.type || 'direct').toString();
+        let participants: string[] = Array.isArray(payload?.participants) ? payload.participants.map(String) : [];
+        participants = Array.from(new Set(participants.filter(Boolean)));
+
+        if (!participants.includes(me.id)) participants.push(me.id);
+        if (participants.length < 2) {
+          return socket.emit('newConversation', { success: false, msg: 'Not enough participants' });
+        }
+
+        const memberOids = participants.map((id) => new Types.ObjectId(id));
+        let conv: any;
+
+        if (type === 'direct' && participants.length === 2) {
+          // 1:1 — find-or-create
+          conv = await Conversation.findOne({ members: { $all: memberOids, $size: 2 } });
+          if (!conv) {
+            conv = await Conversation.create({
+              members: memberOids.sort(),
+              title: payload?.name || undefined,
+              lastMessageAt: new Date(),
+            });
+          }
+        } else {
+          // group — always create new (or you can de-dupe by a hash if you like)
+          conv = await Conversation.create({
+            members: memberOids.sort(),
+            title: payload?.name || undefined,
+            lastMessageAt: new Date(),
+          });
+        }
+
+        // have all participants join the room (only the connected one joins immediately)
+        socket.join(convRoom(String(conv._id)));
+
+        socket.emit('newConversation', { success: true, data: conv });
+      } catch (err: any) {
+        console.error('[socket] newConversation failed:', err?.message || err);
+        socket.emit('newConversation', { success: false, msg: 'Failed to create conversation' });
+      }
+    });
+
+    /* ----------------------------------------------------------
+     * NEW: history fetch via socket ("getMessages")
+     * Your customer app subscribes to this.
+     * Emits back "getMessages" with { success, data: Message[] }
+     * ---------------------------------------------------------- */
+    socket.on('getMessages', async (conversationId: string) => {
+      try {
+        if (!conversationId || !Types.ObjectId.isValid(conversationId)) {
+          return socket.emit('getMessages', { success: false, msg: 'Invalid conversation id' });
+        }
+        const conv = await Conversation.findById(conversationId);
+        if (!conv) return socket.emit('getMessages', { success: false, msg: 'Conversation not found' });
+        if (!conv.members.map(String).includes(me.id)) {
+          return socket.emit('getMessages', { success: false, msg: 'Forbidden' });
+        }
+
+        const docs = await Message.find({ conversationId: conv._id })
+          .sort({ createdAt: -1 })
+          .limit(200)
+          .lean();
+
+        const mapped = docs.map((m: any) => ({
+          _id: String(m._id),
+          content: m.content,
+          attachment: m.attachment ?? null,
+          createdAt: (m.createdAt ?? new Date()).toISOString(),
+          senderId: { _id: String(m.senderId) },
+          conversationId: String(m.conversationId),
+        }));
+
+        socket.emit('getMessages', { success: true, data: mapped });
+      } catch (err: any) {
+        console.error('[socket] getMessages failed:', err?.message || err);
+        socket.emit('getMessages', { success: false, msg: 'Failed to fetch messages' });
+      }
     });
 
     async function createAndBroadcastMessage(p: { conversationId?: string; text?: string; tempId?: string }) {
@@ -106,17 +199,16 @@ export function initSocket(httpServer: HTTPServer) {
       try {
         const sender = Types.ObjectId.isValid(me.id) ? new Types.ObjectId(me.id) : me.id;
         msgDoc = await Message.create({
-          conversationId: conv._id,            // ObjectId
-          senderId: sender,                    // ObjectId or string (schema must allow string to avoid cast error)
+          conversationId: conv._id,
+          senderId: sender,
           content: text,
           createdAt: stamp,
         });
-        if (process.env.NODE_ENV !== 'production') console.log('[socket] mongoose insert OK:', String(msgDoc._id));
       } catch (e) {
         console.error('[socket] mongoose insert failed, falling back to native:', (e as Error).message);
         const db = await getCustomerDb();
         const ins = await db.collection('messages').insertOne({
-          conversationId: conv._id,            // ObjectId
+          conversationId: conv._id,
           senderId: Types.ObjectId.isValid(me.id) ? new Types.ObjectId(me.id) : me.id,
           content: text,
           createdAt: stamp,
@@ -124,7 +216,7 @@ export function initSocket(httpServer: HTTPServer) {
         msgDoc = { _id: ins.insertedId, conversationId: conv._id, senderId: me.id, content: text, createdAt: stamp };
       }
 
-      // 3) Update previews (Mongoose; best-effort)
+      // 3) Update previews
       await Conversation.findByIdAndUpdate(conv._id, {
         lastMessage: text,
         lastMessageAt: stamp,
@@ -135,22 +227,13 @@ export function initSocket(httpServer: HTTPServer) {
       await Promise.all(
         others.map(async (uid) => {
           try {
-            if (Types.ObjectId.isValid(uid)) {
-              await ConversationMeta.updateOne(
-                { conversationId: conv._id, userId: new Types.ObjectId(uid) },
-                { $inc: { unread: 1 } },
-                { upsert: true }
-              );
-            } else {
-              // @ts-expect-error optional string tracking if your schema has userIdStr
-              await ConversationMeta.updateOne(
-                { conversationId: conv._id, userIdStr: uid },
-                { $inc: { unread: 1 }, $setOnInsert: { userIdStr: uid } },
-                { upsert: true }
-              ).catch(() => void 0);
-            }
+            await ConversationMeta.updateOne(
+              { conversationId: conv._id, userId: new Types.ObjectId(uid) },
+              { $inc: { unread: 1 } },
+              { upsert: true }
+            );
           } catch (e) {
-            console.warn('[socket] unread update failed for', uid, (e as Error).message);
+            // ignore
           }
         })
       );
@@ -164,8 +247,10 @@ export function initSocket(httpServer: HTTPServer) {
         createdAt: (msgDoc.createdAt ?? stamp).toISOString(),
       };
 
-      if (process.env.NODE_ENV !== 'production') console.log('[socket] broadcasting message:new', payload);
-      io.to(roomKey(payload.conversationId)).emit('message:new', payload);
+      // Emit BOTH names to satisfy both apps
+      io.to(convRoom(payload.conversationId)).emit('message:new', payload);
+      io.to(convRoom(payload.conversationId)).emit('message:created', { message: payload, conversationId: payload.conversationId });
+
       if (tempId) socket.emit('message:delivered', { tempId, id: payload.id, createdAt: payload.createdAt });
 
       return payload;
@@ -176,21 +261,30 @@ export function initSocket(httpServer: HTTPServer) {
         const m = await createAndBroadcastMessage({ conversationId: p?.conversationId, text: p?.text ?? p?.content, tempId: p?.tempId });
         ack && ack({ ok: true, id: m?.id, createdAt: m?.createdAt });
       } catch (e: any) {
-        console.error('[socket] message:send error:', e?.message || e);
         ack && ack({ ok: false, error: e?.message || 'send_failed' });
       }
     });
 
+    // alias kept
     socket.on('newMessage', async (p: any, ack?: (res: any) => void) => {
       try {
         const m = await createAndBroadcastMessage({ conversationId: p?.conversationId, text: p?.text ?? p?.content, tempId: p?.tempId });
         ack && ack({ ok: true, id: m?.id, createdAt: m?.createdAt });
       } catch (e: any) {
-        console.error('[socket] newMessage error:', e?.message || e);
         ack && ack({ ok: false, error: e?.message || 'send_failed' });
       }
+    });
+
+    /* You already have DELETE via REST; if you emit on delete, make payload shape compatible */
+    // Example: somewhere else you call io.to(convRoom(id)).emit('conversation:deleted', { id })
+    // Add this helper so any delete can broadcast both keys:
+    socket.on('conversation:broadcastDeleted', (id: string) => {
+      if (!id) return;
+      io.to(convRoom(id)).emit('conversation:deleted', { id, conversationId: id });
     });
   });
 
   return io;
 }
+
+export const rooms = { userRoom, convRoom };

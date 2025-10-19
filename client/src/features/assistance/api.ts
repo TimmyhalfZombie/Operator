@@ -49,11 +49,27 @@ export async function fetchNextAssist(): Promise<AssistanceRequest | null> {
   return normalize(raw);
 }
 
-/** Accept a specific request by id. Returns conversationId if created/ensured. */
-export async function acceptAssist(id: string): Promise<{ conversationId?: string; autoMessageSent?: boolean }> {
+/** Shape we expect back from accept (supports both old/new wrappers). */
+export type AcceptAssistResponse = {
+  ok: boolean;
+  conversationId?: string;
+  autoMessageSent?: boolean;
+};
+
+/** Accept a specific request by id. Returns { ok, conversationId }. */
+export async function acceptAssist(id: string): Promise<AcceptAssistResponse> {
   try {
     const res = await api(`/api/assist/${id}/accept`, { method: 'POST', auth: true });
-    return (res?.data ?? res) as { conversationId?: string; autoMessageSent?: boolean };
+
+    // Normalize wrapper shapes:
+    const body = (res && (res as any).data !== undefined ? (res as any).data : res) as any;
+
+    // Server returns { ok: true, conversationId?: string }
+    const ok = Boolean(body?.ok ?? body?.success ?? true); // default to true if server omitted ok
+    const conversationId = body?.conversationId ?? undefined;
+    const autoMessageSent = body?.autoMessageSent ?? undefined;
+
+    return { ok, conversationId, autoMessageSent };
   } catch (e: any) {
     const msg = String(e?.message || '');
     if (/not\s*pending|not\s*found|404|409/i.test(msg)) {

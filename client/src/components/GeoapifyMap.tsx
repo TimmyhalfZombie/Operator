@@ -1,10 +1,10 @@
 // client/components/GeoapifyMap.tsx
 import MapLibreGL from '@maplibre/maplibre-react-native';
+import Constants from 'expo-constants';
 import React from 'react';
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import Constants from 'expo-constants';
 import { GEOAPIFY_KEY } from '../constants/geo';
-import UserPin from './ClientPin';
+// import UserPin from './ClientPin';
 
 type Props = {
   /** Client/customer latitude */
@@ -95,7 +95,12 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
   // Decide which raster tiles to use (Geoapify vs OSM fallback)
   React.useEffect(() => {
     let alive = true;
-    testGeoapifyKey(GEOAPIFY_KEY).then((good) => alive && setUseGeoapify(good));
+    console.log('Testing Geoapify key:', GEOAPIFY_KEY ? 'Present' : 'Missing');
+    console.log('GEOAPIFY_KEY value:', GEOAPIFY_KEY);
+    testGeoapifyKey(GEOAPIFY_KEY).then((good) => {
+      console.log('Geoapify key test result:', good);
+      if (alive) setUseGeoapify(good);
+    });
     return () => {
       alive = false;
     };
@@ -156,6 +161,12 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
   const osmTiles = ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'];
   const tiles = useGeoapify ? geoapifyTiles : osmTiles;
   const maxZoom = useGeoapify ? 20 : 19;
+  
+  console.log('Map tile configuration:', {
+    useGeoapify,
+    tileUrl: tiles[0],
+    maxZoom
+  });
 
   // If operator is known, fit both points; otherwise center on client
   const bounds =
@@ -213,13 +224,15 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style }: Props) {
           </MapLibreGL.ShapeSource>
         )}
 
-        {/* Client pin (red) */}
+        {/* Client pin (blue) */}
         <MapLibreGL.MarkerView
           id="client-pin"
           coordinate={clientCenter}
           anchor={{ x: 0.5, y: 1.0 }}
         >
-          <UserPin />
+          <View style={styles.clientPin}>
+            <View style={styles.clientPinInner} />
+          </View>
         </MapLibreGL.MarkerView>
 
         {/* Operator pin (green) from appdb */}
@@ -255,6 +268,25 @@ const styles = StyleSheet.create({
   // (Only used when lat/lng are missing)
   placeholder: { alignItems: 'center', justifyContent: 'center' },
   placeholderText: { color: '#aaa' },
+
+  // Client pin (blue dot with white ring)
+  clientPin: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#0A84FF',
+    borderWidth: 3,
+    borderColor: 'white',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clientPinInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'white',
+    opacity: 0.8,
+  },
 
   // Operator pin (simple green dot with white ring)
   operatorDotOuter: {

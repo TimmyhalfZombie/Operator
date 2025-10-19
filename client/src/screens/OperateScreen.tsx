@@ -15,14 +15,25 @@ export default function OperateScreen() {
   const pressRef = useRef(0);
   const [phase, setPhase] = useState<Phase>('idle');
   const [tempC, setTempC] = useState<number>(0);
+  // Delay the visible label for retracting by 1s
+  const [labelPhase, setLabelPhase] = useState<Phase>('idle');
 
   const busy = phase !== 'idle';
 
   const label =
-    phase === 'idle' ? 'START' :
-    phase === 'extending' ? 'EXTENDING…' :
-    phase === 'heating' ? 'HEATING…' :
+    labelPhase === 'idle' ? 'START' :
+    labelPhase === 'extending' ? 'EXTENDING…' :
+    labelPhase === 'heating' ? 'HEATING…' :
     'RETRACTING…';
+
+  // Keep label in prior phase for 1s before showing RETRACTING
+  useEffect(() => {
+    if (phase === 'retracting') {
+      const t = setTimeout(() => setLabelPhase('retracting'), 1000);
+      return () => clearTimeout(t);
+    }
+    setLabelPhase(phase);
+  }, [phase]);
 
   const handleStart = async () => {
     if (busy) return;
@@ -37,6 +48,22 @@ export default function OperateScreen() {
     } catch (e) {
       console.log('sendByte error:', e);
       Alert.alert('Error', 'Failed to send START. Check connection.');
+    }
+  };
+
+  const handleStop = async () => {
+    try {
+      if (!isConnected) {
+        Alert.alert('Not connected', 'Please connect to a device first.');
+        return;
+      }
+      // UI: immediately reflect retracting to avoid brief START flash
+      setPhase('retracting');
+      // Convention: send 0 to signal STOP/ABORT; adjust to firmware as needed
+      await sendByte(0);
+    } catch (e) {
+      console.log('sendByte STOP error:', e);
+      Alert.alert('Error', 'Failed to send STOP. Check connection.');
     }
   };
 
@@ -107,6 +134,16 @@ export default function OperateScreen() {
           busy && styles.phaseTxt
         ]}>{label}</Text>
       </TouchableOpacity>
+
+      {busy && (
+        <TouchableOpacity
+          style={styles.stopBtn}
+          onPress={handleStop}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.stopTxt}>STOP</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -142,5 +179,20 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: 'bold',
     fontFamily: INTER_BLACK,
+  },
+  stopBtn: {
+    marginTop: 16,
+    width: '90%',
+    alignSelf: 'center',
+    backgroundColor: '#C83333',
+    paddingVertical: 18,
+    borderRadius: 14,
+  },
+  stopTxt: {
+    textAlign: 'center',
+    color: '#111',
+    fontFamily: INTER_BLACK,
+    fontSize: 18,
+    letterSpacing: 2,
   },
 });
