@@ -4,10 +4,10 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import DeclineConfirmationModal from '../../../components/DeclineConfirmationModal';
 import GeoapifyMap from '../../../components/GeoapifyMap';
 import { useDeclinedRequests } from '../../../contexts/DeclinedRequestsContext';
+import { acceptAssist } from '../../assistance/api'; // 🔹 use the updated accept
 import useAcceptedJobUI from '../../useAcceptedJobUI';
 import { useNextAssist } from '../../useNextRequest';
 import RequestBottomCard from '../components/RequestBottomCard';
-import { acceptAssist } from '../../assistance/api'; // 🔹 use the updated accept
 
 type LatLng = { lat: number; lng: number };
 
@@ -93,7 +93,7 @@ export default function RequestAssistanceScreen() {
 
   return (
     <View style={styles.container}>
-      <GeoapifyMap lat={lat} lng={lng} />
+      <GeoapifyMap lat={lat} lng={lng} showOperator={accepted} />
 
       {!accepted && data && (
         <RequestBottomCard

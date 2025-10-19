@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { ObjectId } from 'mongodb';
 import { Types } from 'mongoose';
-import { getCustomerDb } from '../db/connect';
+import { getAuthDb, getCustomerDb } from '../db/connect';
 import { requireAuth } from '../middleware/jwt';
 import { getIO } from '../socket'; // best-effort: if socket exists we'll emit
 
@@ -563,6 +563,46 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
 
     if (!result || !result.value) {
       return res.status(404).json({ message: 'Request not found or not pending' });
+    }
+
+    // 2) Update operator's location in the users collection
+    try {
+      const authDb = getAuthDb();
+      const usersColl = authDb.collection('users');
+      const operatorId = new ObjectId((req as any).user.id);
+      
+      // Get current location from request body or use initial location
+      const { lat, lng, address } = req.body || {};
+      
+      if (lat && lng) {
+        // Update with provided location
+        await usersColl.updateOne(
+          { _id: operatorId },
+          {
+            $set: {
+              last_lat: Number(lat),
+              last_lng: Number(lng),
+              last_address: address || null,
+              last_seen_at: new Date(),
+            }
+          }
+        );
+        console.log(`Updated operator ${operatorId} location: ${lat}, ${lng}`);
+      } else {
+        // Just update last seen time
+        await usersColl.updateOne(
+          { _id: operatorId },
+          {
+            $set: {
+              last_seen_at: new Date(),
+            }
+          }
+        );
+        console.log(`Updated operator ${operatorId} last seen time`);
+      }
+    } catch (locationError) {
+      console.error('Error updating operator location:', locationError);
+      // Don't fail the request if location update fails
     }
 
     // 2) Ensure a single shared conversation between operator and client

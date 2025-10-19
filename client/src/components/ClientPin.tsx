@@ -1,5 +1,5 @@
   import React from 'react';
-  import { View, StyleSheet, Animated, Easing, Platform, PixelRatio } from 'react-native';
+import { Animated, Easing, PixelRatio, Platform, StyleSheet, View } from 'react-native';
 
   const BLUE = '#0A84FF';
 
@@ -9,7 +9,7 @@
     pulseScale?: number;   // how big the pulse grows
   };
 
-  export default function UserPin({ dotSize = 20, ring = 4, pulseScale = 1.8 }: Props) {
+  export default function UserPin({ dotSize = 16, ring = 2, pulseScale = 1.8 }: Props) {
     const OUTER = dotSize + ring * 2;                           // visible dot incl. white ring
     const BOX   = Math.ceil(PixelRatio.roundToNearestPixel(OUTER * pulseScale)) + 2; // wrapper size (no clipping)
 
