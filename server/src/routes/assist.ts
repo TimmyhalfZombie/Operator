@@ -237,8 +237,8 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       // Get client information
       if (d.userId) {
         try {
-          const authDb = getAuthDb();
-          const client = await authDb.collection('users').findOne({ _id: new ObjectId(String(d.userId)) });
+          const customerDb = getCustomerDb();
+          const client = await customerDb.collection('users').findOne({ _id: new ObjectId(String(d.userId)) });
           if (client) {
             clientInfo = {
               name: client.name || null,
@@ -396,23 +396,10 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     
     // Get client information including avatar
     let clientInfo = null;
-    console.log('Single request - doc.userId:', doc.userId, 'Type:', typeof doc.userId);
-    console.log('Single request - doc keys:', Object.keys(doc));
-    console.log('Single request - doc.userId field:', doc.userId);
     if (doc.userId) {
       try {
-        const authDb = getAuthDb();
-        console.log('Single request - Searching for userId:', String(doc.userId));
-        
-        // Try users collection first
-        let client = await authDb.collection('users').findOne({ _id: new ObjectId(String(doc.userId)) });
-        console.log('Single request - found client in users:', client ? 'Yes' : 'No');
-        
-        // If not found, try customers collection
-        if (!client) {
-          client = await authDb.collection('customers').findOne({ _id: new ObjectId(String(doc.userId)) });
-          console.log('Single request - found client in customers:', client ? 'Yes' : 'No');
-        }
+        const customerDb = getCustomerDb();
+        const client = await customerDb.collection('users').findOne({ _id: new ObjectId(String(doc.userId)) });
         
         if (client) {
           clientInfo = {
@@ -420,15 +407,10 @@ router.get('/:id', requireAuth, async (req, res, next) => {
             avatar: client.avatar || null,
             email: client.email || null,
           };
-          console.log('Single request - client info created:', clientInfo);
-        } else {
-          console.log('Single request - No client found in users or customers collection');
         }
       } catch (e) {
-        console.log('Error fetching client info:', e);
+        // Silent error handling
       }
-    } else {
-      console.log('Single request - No userId found in doc');
     }
 
     const response = {
@@ -456,7 +438,6 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       user: clientInfo,
     };
     
-    console.log('Single request - response user field:', clientInfo);
     res.json(response);
   } catch (e) {
     next(e);

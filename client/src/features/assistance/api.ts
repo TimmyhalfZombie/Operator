@@ -32,6 +32,10 @@ function normalize(raw: any): AssistanceRequest {
     createdAt: raw?.createdAt,
     updatedAt: raw?.updatedAt,
 
+    // User information
+    userId: raw?.userId,
+    user: raw?.user,
+
     // Preserve full objects for consumers that need them
     location: raw?.location,
     vehicle: raw?.vehicle,

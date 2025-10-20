@@ -69,12 +69,6 @@ export default function ActivityDetailScreen() {
   // Check if this is a completed job (after pressing "Repaired")
   const isCompletedJob = doc && status === 'completed' && timeRepaired;
 
-  // Debug logging for avatar (once)
-  React.useEffect(() => {
-    if (clientAvatar) {
-      console.log('ActivityDetailScreen: Client avatar loaded:', clientAvatar);
-    }
-  }, [clientAvatar]);
 
   const handleRepaired = async () => {
     if (!doc) return;
@@ -302,12 +296,8 @@ export default function ActivityDetailScreen() {
                 <Image 
                   source={{ uri: clientAvatar }} 
                   style={styles.avatar}
-                  onError={(error) => {
-                    console.log('Avatar image load error:', error);
-                  }}
-                  onLoad={() => {
-                    console.log('Avatar image loaded successfully');
-                  }}
+                  onError={() => {}}
+                  onLoad={() => {}}
                 />
               ) : (
                 <View style={styles.avatar}>
@@ -407,12 +397,8 @@ export default function ActivityDetailScreen() {
               <Image 
                 source={{ uri: clientAvatar }} 
                 style={styles.avatar}
-                onError={(error) => {
-                  console.log('Avatar image load error:', error);
-                }}
-                onLoad={() => {
-                  console.log('Avatar image loaded successfully');
-                }}
+                onError={() => {}}
+                onLoad={() => {}}
               />
             ) : (
               <View style={styles.avatar}>

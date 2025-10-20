@@ -85,9 +85,6 @@ export function useActivityDetail() {
       }
 
       if (fresh) {
-        console.log('Fresh data from server:', Object.keys(fresh));
-        console.log('Fresh data userId:', fresh.userId);
-        console.log('Fresh data user:', fresh.user);
         setDoc(fresh);             // overwrite cache version with authoritative server doc
         setErr('');
       } else if (!doc && !silent) {
@@ -164,14 +161,6 @@ export function useActivityDetail() {
     // Get client avatar from user data
     clientAvatar = doc?.user?.avatar || doc?.client?.avatar || doc?.customer?.avatar || null;
     
-    // Debug logging (once)
-    if (clientAvatar) {
-      console.log('Client avatar found:', clientAvatar);
-    } else {
-      console.log('No client avatar found. User data:', doc?.user);
-      console.log('Full doc keys:', Object.keys(doc || {}));
-      console.log('Doc userId:', doc?.userId);
-    }
 
     if (doc?.operator) {
       const operatorName = doc.operator.name || 'Operator';
