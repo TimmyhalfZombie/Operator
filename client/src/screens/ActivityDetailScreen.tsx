@@ -63,11 +63,20 @@ export default function ActivityDetailScreen() {
 
   const acceptedJobUI = useAcceptedJobUI();
 
-  // Check if this is an accepted job that hasn't been completed
+  // Check if this is a newly accepted job (just accepted, not ongoing)
   const isAcceptedJob = doc && status === 'accepted' && !timeRepaired;
   
   // Check if this is a completed job (after pressing "Repaired")
   const isCompletedJob = doc && status === 'completed' && timeRepaired;
+  
+  // Debug logging
+  console.log('ActivityDetailScreen Debug:', {
+    status,
+    timeRepaired,
+    isAcceptedJob,
+    isCompletedJob,
+    doc: !!doc
+  });
 
 
   const handleRepaired = async () => {
@@ -123,7 +132,7 @@ export default function ActivityDetailScreen() {
     );
   }
 
-  // Show the exact same interface as the accepted job screen
+  // Show the accepted job interface (for newly accepted jobs)
   if (isAcceptedJob) {
   return (
       <View style={styles.container}>
@@ -230,11 +239,12 @@ export default function ActivityDetailScreen() {
             <TouchableOpacity onPress={handleTerminate} activeOpacity={0.9} style={styles.powerBtn}>
               <Icons.Power size={26} weight="bold" color="#FFFFFF" />
         </TouchableOpacity>
-          </View>
+      </View>
         </View>
       </View>
     );
   }
+
 
   // Show completed job details with full-screen interface
   if (isCompletedJob) {
@@ -552,6 +562,7 @@ const styles = StyleSheet.create({
     elevation: 16,
   },
 
+
   // Client card (matches the image exactly)
   clientCard: {
     backgroundColor: '#C4F5D7',
@@ -725,7 +736,7 @@ const styles = StyleSheet.create({
        shadowRadius: 10,
        shadowOffset: { width: 0, height: 6 },
        elevation: 8
-   },
+  },
 
   row: { 
     flexDirection: 'row', 

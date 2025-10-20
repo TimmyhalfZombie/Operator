@@ -78,7 +78,7 @@ export function useActivityScreen() {
     if (aid && String(aid) !== String(rid)) qs.set('activityId', String(aid));
     qs.set('snap', snap);
 
-    const url = `/activity-detail?${qs.toString()}`;
+    const url = `/ongoing-detail?${qs.toString()}`;
     // eslint-disable-next-line no-console
     console.log('[OngoingActivity] push detail with', { rid, aid, url });
 
