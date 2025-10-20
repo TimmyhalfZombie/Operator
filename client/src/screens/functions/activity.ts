@@ -53,14 +53,36 @@ export function timeAgo(iso?: string | null) {
 }
 
 export function useActivityScreen() {
-  const { newItems, recentItems, loading, error } = useActivity();
+  const { newItems, ongoingItems, recentItems, loading, error } = useActivity();
   const empty = useMemo(
-    () => !loading && !error && newItems.length === 0 && recentItems.length === 0,
-    [loading, error, newItems.length, recentItems.length]
+    () => !loading && !error && newItems.length === 0 && ongoingItems.length === 0 && recentItems.length === 0,
+    [loading, error, newItems.length, ongoingItems.length, recentItems.length]
   );
 
   const onPressNew = React.useCallback(() => {
     router.push('/assist');
+  }, []);
+
+  const onPressOngoing = React.useCallback((it: any) => {
+    const rid = resolveRequestId(it);
+    const aid = resolveActivityId(it);
+
+    // keep snapshot small (prefer _raw if present)
+    let snapSrc: any = (it as any)?._raw ?? it;
+    // strip very heavy fields if any
+    const { image, photo, ...rest } = snapSrc || {};
+    const snap = encodeURIComponent(JSON.stringify(rest || {}));
+
+    const qs = new URLSearchParams();
+    if (rid) qs.set('id', String(rid));
+    if (aid && String(aid) !== String(rid)) qs.set('activityId', String(aid));
+    qs.set('snap', snap);
+
+    const url = `/activity-detail?${qs.toString()}`;
+    // eslint-disable-next-line no-console
+    console.log('[OngoingActivity] push detail with', { rid, aid, url });
+
+    router.push(url);
   }, []);
 
   const onPressRecent = React.useCallback((it: any) => {
@@ -85,7 +107,7 @@ export function useActivityScreen() {
     router.push(url);
   }, []);
 
-  return { newItems, recentItems, loading, error, empty, onPressNew, onPressRecent } as const;
+  return { newItems, ongoingItems, recentItems, loading, error, empty, onPressNew, onPressOngoing, onPressRecent } as const;
 }
 
 

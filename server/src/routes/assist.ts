@@ -180,14 +180,16 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       })
       .toArray();
 
-    // Get operator information for each request
+    // Get operator and client information for each request
     const items = await Promise.all(docs.map(async (d) => {
       let operatorInfo = null;
+      let clientInfo = null;
       
       // For completed requests, show the operator who completed it
       if (d.status === 'completed' && d.completedBy) {
         try {
           const operator = await customerDb.collection('operators').findOne({ user_id: String(d.completedBy) });
+          console.log('Found operator for completedBy:', operator);
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
@@ -199,6 +201,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
               initial_address: operator.initial_address || null,
               lastSeen: lastSeen || null,
+              avatar: operator.avatar || null,
             };
           }
         } catch (e) {
@@ -210,6 +213,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
         try {
           const operatorId = d.assignedTo || d.acceptedBy;
           const operator = await customerDb.collection('operators').findOne({ user_id: String(operatorId) });
+          console.log('Found operator for assignedTo/acceptedBy:', operator);
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
@@ -222,10 +226,28 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
               initial_address: operator.initial_address || null,
               lastSeen: lastSeen || null,
               acceptedAt: d.updatedAt || d.updated_at || null, // Use updatedAt as acceptance time
+              avatar: operator.avatar || null,
             };
           }
         } catch (e) {
           console.log('Error fetching operator info:', e);
+        }
+      }
+
+      // Get client information
+      if (d.userId) {
+        try {
+          const authDb = getAuthDb();
+          const client = await authDb.collection('users').findOne({ _id: new ObjectId(String(d.userId)) });
+          if (client) {
+            clientInfo = {
+              name: client.name || null,
+              avatar: client.avatar || null,
+              email: client.email || null,
+            };
+          }
+        } catch (e) {
+          // Silent error handling for inbox
         }
       }
 
@@ -245,6 +267,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
         contactName: d.contactName || null,
         customerPhone: d.customerPhone || null,
         operator: operatorInfo,
+        user: clientInfo,
       };
     }));
 
@@ -339,9 +362,10 @@ router.get('/:id', requireAuth, async (req, res, next) => {
             location: operator.last_address || operator.initial_address || (lat && lng ? 
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
             initial_address: operator.initial_address || null,
-            lastSeen: lastSeen || null,
-            acceptedAt: doc.updatedAt || doc.updated_at || null,
-          };
+              lastSeen: lastSeen || null,
+              acceptedAt: doc.updatedAt || doc.updated_at || null,
+              avatar: operator.avatar || null,
+            };
         }
       } catch (e) {
         // Error fetching operator info - silently continue
@@ -360,15 +384,53 @@ router.get('/:id', requireAuth, async (req, res, next) => {
             location: operator.last_address || operator.initial_address || (lat && lng ? 
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
             initial_address: operator.initial_address || null,
-            lastSeen: lastSeen || null,
-            acceptedAt: doc.updatedAt || doc.updated_at || null,
-          };
+              lastSeen: lastSeen || null,
+              acceptedAt: doc.updatedAt || doc.updated_at || null,
+              avatar: operator.avatar || null,
+            };
         }
       } catch (e) {
         // Error fetching operator info - silently continue
       }
     }
     
+    // Get client information including avatar
+    let clientInfo = null;
+    console.log('Single request - doc.userId:', doc.userId, 'Type:', typeof doc.userId);
+    console.log('Single request - doc keys:', Object.keys(doc));
+    console.log('Single request - doc.userId field:', doc.userId);
+    if (doc.userId) {
+      try {
+        const authDb = getAuthDb();
+        console.log('Single request - Searching for userId:', String(doc.userId));
+        
+        // Try users collection first
+        let client = await authDb.collection('users').findOne({ _id: new ObjectId(String(doc.userId)) });
+        console.log('Single request - found client in users:', client ? 'Yes' : 'No');
+        
+        // If not found, try customers collection
+        if (!client) {
+          client = await authDb.collection('customers').findOne({ _id: new ObjectId(String(doc.userId)) });
+          console.log('Single request - found client in customers:', client ? 'Yes' : 'No');
+        }
+        
+        if (client) {
+          clientInfo = {
+            name: client.name || null,
+            avatar: client.avatar || null,
+            email: client.email || null,
+          };
+          console.log('Single request - client info created:', clientInfo);
+        } else {
+          console.log('Single request - No client found in users or customers collection');
+        }
+      } catch (e) {
+        console.log('Error fetching client info:', e);
+      }
+    } else {
+      console.log('Single request - No userId found in doc');
+    }
+
     const response = {
       id: String(doc._id),
       status: doc.status,
@@ -389,9 +451,12 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       completedAt: doc?.completedAt ?? null,
       createdAt: doc?.createdAt ?? null,
       updatedAt: doc?.updatedAt ?? null,
+      userId: doc?.userId ? String(doc.userId) : null,
       operator: operatorInfo,
+      user: clientInfo,
     };
     
+    console.log('Single request - response user field:', clientInfo);
     res.json(response);
   } catch (e) {
     next(e);
@@ -431,6 +496,7 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
                   `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
                 lastSeen: lastSeen || null,
                 acceptedAt: assistDoc.updatedAt || assistDoc.updated_at || null,
+                avatar: operator.avatar || null,
               };
             }
           } catch (e) {

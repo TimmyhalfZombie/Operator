@@ -1,11 +1,12 @@
 import * as Icons from 'phosphor-react-native';
 import React from 'react';
 import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Animated,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useImmersiveMode } from '../hooks/useImmersiveMode';
@@ -26,6 +27,7 @@ type ActivityItemProps = {
   title: string;
   subtitle?: string;
   isNew?: boolean;
+  isOngoing?: boolean;
   onPress?: () => void;
 };
 
@@ -33,13 +35,45 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
   title,
   subtitle,
   isNew,
+  isOngoing,
   onPress,
 }) => {
+  // Animation for ongoing jobs
+  const pulseAnim = React.useRef(new Animated.Value(1)).current;
+
+  React.useEffect(() => {
+    if (isOngoing) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.2,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulse.start();
+      return () => pulse.stop();
+    }
+  }, [isOngoing, pulseAnim]);
   const Content = (
     <View style={styles.itemRow}>
       <View style={styles.itemLeft}>
         <View style={styles.itemIcon}>
-          <Icons.Wrench size={18} color={GREEN} weight="bold" />
+          {isOngoing ? (
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <Icons.Clock size={18} color="#FFA500" weight="bold" />
+            </Animated.View>
+          ) : isNew ? (
+            <Icons.Wrench size={18} color={GREEN} weight="bold" />
+          ) : (
+            <Icons.CheckCircle size={18} color={GREEN} weight="bold" />
+          )}
         </View>
         <View style={styles.itemTextWrap}>
           {isNew && <Text style={styles.badgeNew}>Request assistance</Text>}
@@ -61,11 +95,11 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
       <View style={styles.itemRight}>
         {isNew ? (
           <View style={styles.newDot} />
-        ) : (
-          <View style={styles.checkWrap}>
-            <Icons.Check size={15} color="#000000" weight="bold" />
-          </View>
-        )}
+        ) : isOngoing ? (
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+            <Icons.Clock size={15} color="#FFA500" weight="bold" />
+          </Animated.View>
+        ) : null}
       </View>
     </View>
   );
@@ -83,7 +117,7 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
 
 const ActivityScreen: React.FC = () => {
   useImmersiveMode();
-  const { newItems, recentItems, loading, error, empty, onPressNew, onPressRecent } = useActivityScreen();
+  const { newItems, ongoingItems, recentItems, loading, error, empty, onPressNew, onPressOngoing, onPressRecent } = useActivityScreen();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -124,6 +158,43 @@ const ActivityScreen: React.FC = () => {
                           onPress={onPressNew}
                         />
                         {idx < newItems.length - 1 && <View style={styles.divider} />}
+                      </React.Fragment>
+                    );
+                  })}
+                </View>
+                <View style={styles.sectionSpacer} />
+              </>
+            )}
+
+            {ongoingItems.length > 0 && (
+              <>
+                <Text style={styles.sectionTitle}>Ongoing</Text>
+                <View style={styles.card}>
+                  {ongoingItems.map((it, idx) => {
+                    const clientName = it?.clientName || it?.customerName || it?.contactName || 'Client';
+                    const vehicleModel = it?.vehicle?.model || (it as any)?.vehicleType || 'Vehicle';
+                    const clientLocation =
+                      it?.location?.address ||
+                      it?.location?.formatted_address ||
+                      it?.location?.display_name ||
+                      (it as any)?.address ||
+                      'Location';
+                    const date = formatWhen(it.createdAt);
+
+                    const title = clientName;
+                    const subtitle = `${vehicleModel}\n${clientLocation}\n${date}`;
+
+                    const onPress = () => onPressOngoing(it);
+
+                    return (
+                      <React.Fragment key={resolveRequestId(it) ?? it.id ?? idx}>
+                        <ActivityItem
+                          isOngoing
+                          title={title}
+                          subtitle={subtitle}
+                          onPress={onPress}
+                        />
+                        {idx < ongoingItems.length - 1 && <View style={styles.divider} />}
                       </React.Fragment>
                     );
                   })}
@@ -304,6 +375,20 @@ const styles = StyleSheet.create({
     height: 18, 
     borderRadius: 13, 
     backgroundColor: '#50FF80',
+    alignItems: 'center', 
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+
+  clockWrap: {
+    width: 18, 
+    height: 18, 
+    borderRadius: 13, 
+    backgroundColor: '#FFA500',
     alignItems: 'center', 
     justifyContent: 'center',
     shadowColor: '#000000',

@@ -75,7 +75,7 @@ export function useActivity() {
   }, [load, schedule]);
 
 
-  // Split into "New" (pending) vs "Recent" (non-pending)
+  // Split into "New" (pending), "Ongoing" (accepted but not completed), and "Recent" (completed/other)
   // Hide requests that this operator has declined locally, but keep database status as pending
   const newItems = useMemo(() => 
     items.filter(i => 
@@ -83,12 +83,21 @@ export function useActivity() {
       !declinedIds.has(i.id)
     ), [items, declinedIds]
   );
+  
+  const ongoingItems = useMemo(() => 
+    items.filter(i => 
+      (i.status || 'pending') === 'accepted' &&
+      !declinedIds.has(i.id)
+    ), [items, declinedIds]
+  );
+  
   const recentItems = useMemo(() => 
     items.filter(i => 
       (i.status || 'pending') !== 'pending' &&
+      (i.status || 'pending') !== 'accepted' &&
       !declinedIds.has(i.id)
     ), [items, declinedIds]
   );
 
-  return { items, newItems, recentItems, loading, error, markAsDeclined, reload: () => load(false) };
+  return { items, newItems, ongoingItems, recentItems, loading, error, markAsDeclined, reload: () => load(false) };
 }

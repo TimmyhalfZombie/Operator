@@ -85,6 +85,9 @@ export function useActivityDetail() {
       }
 
       if (fresh) {
+        console.log('Fresh data from server:', Object.keys(fresh));
+        console.log('Fresh data userId:', fresh.userId);
+        console.log('Fresh data user:', fresh.user);
         setDoc(fresh);             // overwrite cache version with authoritative server doc
         setErr('');
       } else if (!doc && !silent) {
@@ -139,7 +142,7 @@ export function useActivityDetail() {
   }, [loadData, schedule]);
 
   // ---- render prep values
-  let customer: string = 'Customer', contactName: string | null = null, customerPhone: string | null = null, startName: string = 'Start', startAddr: string = '', endName: string = 'Vehicle', endAddr: string = 'Location', status: string = 'Repaired', timeRepaired: string | null = null, rating: number = 0, timeRange: string = '—';
+  let customer: string = 'Customer', contactName: string | null = null, customerPhone: string | null = null, startName: string = 'Start', startAddr: string = '', endName: string = 'Vehicle', endAddr: string = 'Location', status: string = 'Repaired', timeRepaired: string | null = null, rating: number = 0, timeRange: string = '—', clientAvatar: string | null = null;
   
   if (doc) {
     customer = doc?.clientName ?? (p as any).customer ?? 'Customer';
@@ -158,6 +161,18 @@ export function useActivityDetail() {
                             'Location unknown';
     const requestReceivedTime = doc?.createdAt ? new Date(doc.createdAt).toLocaleString() : 'Unknown time';
     
+    // Get client avatar from user data
+    clientAvatar = doc?.user?.avatar || doc?.client?.avatar || doc?.customer?.avatar || null;
+    
+    // Debug logging (once)
+    if (clientAvatar) {
+      console.log('Client avatar found:', clientAvatar);
+    } else {
+      console.log('No client avatar found. User data:', doc?.user);
+      console.log('Full doc keys:', Object.keys(doc || {}));
+      console.log('Doc userId:', doc?.userId);
+    }
+
     if (doc?.operator) {
       const operatorName = doc.operator.name || 'Operator';
       const operatorLastSeen = doc.operator.lastSeen ? new Date(doc.operator.lastSeen).toLocaleString() : 'Unknown time';
@@ -235,6 +250,7 @@ export function useActivityDetail() {
     timeRepaired,
     rating,
     timeRange,
+    clientAvatar,
     handleMessagePress,
   } as const;
 }

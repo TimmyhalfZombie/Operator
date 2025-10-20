@@ -128,18 +128,11 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator =
   // Route feature collection between operator and client
   const [routeFC, setRouteFC] = React.useState<any | null>(null);
 
-  // Decide which raster tiles to use (Geoapify vs OSM fallback)
+  // Use OSM tiles as fallback to avoid timeout issues
   React.useEffect(() => {
-    let alive = true;
-    console.log('Testing Geoapify key:', GEOAPIFY_KEY ? 'Present' : 'Missing');
     console.log('GEOAPIFY_KEY value:', GEOAPIFY_KEY);
-    testGeoapifyKey(GEOAPIFY_KEY).then((good) => {
-      console.log('Geoapify key test result:', good);
-      if (alive) setUseGeoapify(good);
-    });
-    return () => {
-      alive = false;
-    };
+    console.log('Using OSM tiles to avoid timeout issues');
+    setUseGeoapify(false); // Force OSM tiles
   }, []);
 
   // Poll operator location from server every 5 seconds (only if showOperator is true)
@@ -186,8 +179,14 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator =
         if (!cancelled) setRouteFC(null);
         return;
       }
+      console.log('Fetching route from operator to client...');
+      console.log('Operator:', op);
+      console.log('Client:', { lat, lng });
       const fc = await fetchDriveRoute(op.lng, op.lat, lng!, lat!, GEOAPIFY_KEY);
-      if (!cancelled) setRouteFC(fc);
+      if (!cancelled) {
+        setRouteFC(fc);
+        console.log('Route result:', fc ? 'Success - Green line should appear' : 'Failed - No route');
+      }
     })();
 
     return () => {
