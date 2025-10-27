@@ -2,10 +2,10 @@ import MapLibreGL from '@maplibre/maplibre-react-native';
 import React from 'react';
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import {
-  GEOAPIFY_KEY,              // alias to MapTiler key
-  MAPTILER_RASTER_TILES_512, // correct 512 template (no /512/ in path)
-  OSM_RASTER_TILES_256,
-  geoapifyRouteURL,
+    GEOAPIFY_KEY, // alias to MapTiler key
+    MAPTILER_RASTER_TILES_512, // correct 512 template (no /512/ in path)
+    OSM_RASTER_TILES_256,
+    geoapifyRouteURL,
 } from '../constants/geo';
 import { API_URL } from '../lib/env';
 import UserPin from './ClientPin';
@@ -22,6 +22,8 @@ type Props = {
   style?: StyleProp<ViewStyle>;
   /** Show operator pin or not */
   showOperator?: boolean;
+  /** Disable initial auto-zoom/fit behavior */
+  disableAutoZoom?: boolean;
 };
 
 type OperatorLocation = { lat: number; lng: number; updated_at?: string };
@@ -79,13 +81,14 @@ export default function GeoapifyMap({
   zoom = 16,
   style,
   showOperator = true,
+  disableAutoZoom = false,
 }: Props) {
   const clientOk = isNum(lat) && isNum(lng);
   const clientCenter: [number, number] = [lng ?? 0, lat ?? 0];
 
   // We force raster for stability
   const [mode] = React.useState<'raster-mt' | 'raster-osm'>('raster-mt');
-  const [mapReady, setMapReady] = React.useState(true); // raster is ready immediately
+  const [mapReady, setMapReady] = React.useState(false);
 
   const [op, setOp] = React.useState<OperatorLocation | null>(null);
   const [routeFC, setRouteFC] = React.useState<any | null>(null);
@@ -94,6 +97,7 @@ export default function GeoapifyMap({
   const camRef = React.useRef<MapLibreGL.Camera>(null);
   const userHasTakenControl = React.useRef(false);
   const lastAutoCentered = React.useRef<string | null>(null); // `${lng},${lat}` we auto-centered to
+  const autoZoomRetryRef = React.useRef(0);
 
   const onRegionWillChange = React.useCallback((e: any) => {
     const p = e?.nativeEvent?.properties ?? e?.properties ?? {};
@@ -135,24 +139,54 @@ export default function GeoapifyMap({
     return () => { cancelled = true; };
   }, [clientOk, op?.lat, op?.lng, clientCenter[0], clientCenter[1]]);
 
-  // 🔸 Auto-zoom ONCE to the CLIENT as soon as map is ready & coords exist
+  // 🔸 Auto-zoom or auto-fit ONCE on first render (unless disabled)
   React.useEffect(() => {
+    if (disableAutoZoom) return;
     if (!mapReady || !clientOk) return;
-    const key = `${clientCenter[0]},${clientCenter[1]}`;
-    if (userHasTakenControl.current) return;   // don't override user gesture
-    if (lastAutoCentered.current === key) return; // already centered to this client
+
+    // Build a key representing the current target view so we only run once per target
+    const key = showOperator && op && isNum(op.lat) && isNum(op.lng)
+      ? `${clientCenter[0]},${clientCenter[1]}|${op.lng},${op.lat}`
+      : `${clientCenter[0]},${clientCenter[1]}`;
+
+    if (userHasTakenControl.current) return; // don't override user gesture
+    if (lastAutoCentered.current === key) return; // already centered to this target
 
     lastAutoCentered.current = key;
-    // small delay avoids racing first render
-    setTimeout(() => {
-      camRef.current?.setCamera?.({
-        centerCoordinate: clientCenter,
-        zoomLevel: zoom,
-        animationDuration: 500,
-        animationMode: 'flyTo',
-      } as any);
-    }, 50);
-  }, [mapReady, clientOk, clientCenter[0], clientCenter[1], zoom]);
+
+    // small delay + retry loop avoids racing first render/camera mount
+    const doZoom = () => {
+      const hasOperator = showOperator && op && isNum(op.lat) && isNum(op.lng);
+      const cam = camRef.current as any;
+      if (!cam) {
+        if (autoZoomRetryRef.current < 10) {
+          autoZoomRetryRef.current += 1;
+          setTimeout(doZoom, 100);
+        }
+        return;
+      }
+      if (hasOperator && cam.fitBounds) {
+        const sw: [number, number] = [
+          Math.min(clientCenter[0], (op as OperatorLocation).lng),
+          Math.min(clientCenter[1], (op as OperatorLocation).lat),
+        ];
+        const ne: [number, number] = [
+          Math.max(clientCenter[0], (op as OperatorLocation).lng),
+          Math.max(clientCenter[1], (op as OperatorLocation).lat),
+        ];
+        cam.fitBounds(sw, ne, 60, 700);
+      } else if (cam.setCamera) {
+        cam.setCamera({
+          centerCoordinate: clientCenter,
+          zoomLevel: zoom,
+          animationDuration: 500,
+          animationMode: 'flyTo',
+        } as any);
+      }
+    };
+    autoZoomRetryRef.current = 0;
+    setTimeout(doZoom, 100);
+  }, [disableAutoZoom, mapReady, clientOk, clientCenter[0], clientCenter[1], zoom, showOperator, op?.lat, op?.lng]);
 
   if (!clientOk) {
     return (
