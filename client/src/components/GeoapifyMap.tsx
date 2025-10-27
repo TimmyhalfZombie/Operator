@@ -12,10 +12,15 @@ import UserPin from './ClientPin';
 import OperatorPin from './OperatorPin';
 
 type Props = {
+  /** Client latitude */
   lat?: number | null;
+  /** Client longitude */
   lng?: number | null;
+  /** Initial zoom when auto-centering to client */
   zoom?: number;
+  /** Optional container style */
   style?: StyleProp<ViewStyle>;
+  /** Show operator pin or not */
   showOperator?: boolean;
 };
 
@@ -27,13 +32,7 @@ function isNum(v: any): v is number {
 
 MapLibreGL.setAccessToken(null);
 
-// Toggle later if your network allows vector tiles/sprites/glyphs
-const USE_VECTOR = false;
-// Streets v4 vector style (used only if USE_VECTOR=true)
-const VECTOR_STYLE_URL =
-  'https://api.maptiler.com/maps/streets-v4/style.json?key=2qSQ9pofebFXsJIh7Nog';
-
-// Empty style used whenever we render raster tiles
+// Empty style we use while drawing raster tiles
 const EMPTY_STYLE_JSON = JSON.stringify({ version: 8, sources: {}, layers: [] });
 
 async function fetchOperatorLocation(): Promise<OperatorLocation | null> {
@@ -74,47 +73,38 @@ async function fetchDriveRoute(
   }
 }
 
-export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator = true }: Props) {
+export default function GeoapifyMap({
+  lat,
+  lng,
+  zoom = 16,
+  style,
+  showOperator = true,
+}: Props) {
   const clientOk = isNum(lat) && isNum(lng);
   const clientCenter: [number, number] = [lng ?? 0, lat ?? 0];
 
-  // Force raster unless you enable vector above
-  const [mode, setMode] = React.useState<'vector' | 'raster-mt' | 'raster-osm'>(USE_VECTOR ? 'vector' : 'raster-mt');
-  const [mapReady, setMapReady] = React.useState(mode !== 'vector'); // raster usable immediately
+  // We force raster for stability
+  const [mode] = React.useState<'raster-mt' | 'raster-osm'>('raster-mt');
+  const [mapReady, setMapReady] = React.useState(true); // raster is ready immediately
 
   const [op, setOp] = React.useState<OperatorLocation | null>(null);
   const [routeFC, setRouteFC] = React.useState<any | null>(null);
 
-  // Camera + guards (auto-zoom once, then never again after user interaction)
+  // Camera (imperative) + guards
   const camRef = React.useRef<MapLibreGL.Camera>(null);
-  const didInitView = React.useRef(false);
-  const didFitTwoPoints = React.useRef(false);
   const userHasTakenControl = React.useRef(false);
+  const lastAutoCentered = React.useRef<string | null>(null); // `${lng},${lat}` we auto-centered to
 
   const onRegionWillChange = React.useCallback((e: any) => {
     const p = e?.nativeEvent?.properties ?? e?.properties ?? {};
-    const byUser = p?.gesture === true || p?.isUserInteraction === true || p?.manualGesture === true;
+    const byUser =
+      p?.gesture === true ||
+      p?.isUserInteraction === true ||
+      p?.manualGesture === true;
     if (byUser) userHasTakenControl.current = true;
   }, []);
 
-  // Vector: ready after style loads; Raster: ready now
-  const onStyleLoaded = () => setMapReady(true);
-
-  // Ignore harmless “Canceled”; only fallback for real failures
-  const onMapError = (e: any) => {
-    const msg = String(e?.nativeEvent?.message || '');
-    const shouldFallback =
-      /401|403|404|429|5\d\d|Unauthorized|Forbidden|Not Found|Too Many/i.test(msg);
-    if (!shouldFallback) {
-      console.log('Map error (ignored):', msg);
-      return;
-    }
-    console.log('Map error (fallback to raster):', msg);
-    setMapReady(true);
-    setMode('raster-mt');
-  };
-
-  // Poll operator (for the red pin)
+  // Poll operator pin (optional)
   React.useEffect(() => {
     if (!showOperator) {
       setOp(null);
@@ -131,7 +121,7 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator =
     return () => { alive = false; clearTimeout(t); };
   }, [showOperator]);
 
-  // Route fetch (no camera move)
+  // Fetch route (optional overlay)
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -145,32 +135,24 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator =
     return () => { cancelled = true; };
   }, [clientOk, op?.lat, op?.lng, clientCenter[0], clientCenter[1]]);
 
-  // Auto-zoom once (or fit both once) before user interaction
+  // 🔸 Auto-zoom ONCE to the CLIENT as soon as map is ready & coords exist
   React.useEffect(() => {
-    if (!mapReady || !clientOk || userHasTakenControl.current) return;
+    if (!mapReady || !clientOk) return;
+    const key = `${clientCenter[0]},${clientCenter[1]}`;
+    if (userHasTakenControl.current) return;   // don't override user gesture
+    if (lastAutoCentered.current === key) return; // already centered to this client
 
-    if (!op && !didInitView.current) {
-      didInitView.current = true;
-      // Delay a tick to avoid racing initial map render
-      setTimeout(() => {
-        camRef.current?.setCamera?.({
-          centerCoordinate: clientCenter,
-          zoomLevel: zoom,
-          animationDuration: 400,
-          animationMode: 'flyTo',
-        } as any);
-      }, 50);
-    }
-
-    if (op && !didFitTwoPoints.current) {
-      const sw: [number, number] = [Math.min(op.lng, clientCenter[0]), Math.min(op.lat, clientCenter[1])];
-      const ne: [number, number] = [Math.max(op.lng, clientCenter[0]), Math.max(op.lat, clientCenter[1])];
-      setTimeout(() => {
-        camRef.current?.fitBounds?.(sw, ne, 60, 800);
-      }, 50);
-      didFitTwoPoints.current = true;
-    }
-  }, [mapReady, clientOk, op?.lat, op?.lng, clientCenter[0], clientCenter[1], zoom]);
+    lastAutoCentered.current = key;
+    // small delay avoids racing first render
+    setTimeout(() => {
+      camRef.current?.setCamera?.({
+        centerCoordinate: clientCenter,
+        zoomLevel: zoom,
+        animationDuration: 500,
+        animationMode: 'flyTo',
+      } as any);
+    }, 50);
+  }, [mapReady, clientOk, clientCenter[0], clientCenter[1], zoom]);
 
   if (!clientOk) {
     return (
@@ -188,43 +170,49 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator =
         logoEnabled={false}
         attributionEnabled={false}
         onRegionWillChange={onRegionWillChange}
-        onDidFinishLoadingStyle={onStyleLoaded}
-        onMapError={onMapError}
-        {...(mode === 'vector'
-          ? { styleURL: VECTOR_STYLE_URL }
-          : { styleJSON: EMPTY_STYLE_JSON })}
+        onDidFinishLoadingStyle={() => setMapReady(true)}
+        onMapError={(e) => {
+          const msg = String(e?.nativeEvent?.message || '');
+          // ignore harmless "Canceled" during zoom/pan
+          const realFail = /401|403|404|429|5\d\d|Unauthorized|Forbidden|Not Found|Too Many/i.test(msg);
+          if (!realFail) {
+            console.log('Map error (ignored):', msg);
+            return;
+          }
+          console.log('Map error:', msg);
+        }}
+        // Raster mode: provide empty vector style JSON
+        styleJSON={EMPTY_STYLE_JSON}
       >
         <MapLibreGL.Camera ref={camRef as any} />
 
-        {/* Base raster tiles when not in vector mode */}
-        {mode !== 'vector' && (
-          <MapLibreGL.RasterSource
-            id="custom-base"
-            tileUrlTemplates={mode === 'raster-mt' ? MAPTILER_RASTER_TILES_512 : OSM_RASTER_TILES_256}
-            tileSize={mode === 'raster-mt' ? 512 : 256}
-            minZoomLevel={0}
-            maxZoomLevel={19}
-          >
-            <MapLibreGL.RasterLayer id="custom-base-layer" />
-          </MapLibreGL.RasterSource>
-        )}
+        {/* Base raster tiles */}
+        <MapLibreGL.RasterSource
+          id="base"
+          tileUrlTemplates={mode === 'raster-mt' ? MAPTILER_RASTER_TILES_512 : OSM_RASTER_TILES_256}
+          tileSize={mode === 'raster-mt' ? 512 : 256}
+          minZoomLevel={0}
+          maxZoomLevel={19}
+        >
+          <MapLibreGL.RasterLayer id="base-layer" />
+        </MapLibreGL.RasterSource>
 
         {/* Optional route overlay */}
         {routeFC && (
-          <MapLibreGL.ShapeSource id="custom-route" shape={routeFC}>
+          <MapLibreGL.ShapeSource id="route" shape={routeFC}>
             <MapLibreGL.LineLayer
-              id="custom-route-line"
+              id="route-line"
               style={{ lineColor: '#6EFF87', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.95 }}
             />
           </MapLibreGL.ShapeSource>
         )}
 
-        {/* Client pin */}
+        {/* Client pin (blue) */}
         <MapLibreGL.MarkerView id="client-pin" coordinate={clientCenter} anchor={{ x: 0.5, y: 1.0 }}>
           <UserPin />
         </MapLibreGL.MarkerView>
 
-        {/* Operator pin */}
+        {/* Operator pin (red) */}
         {showOperator && op && isNum(op.lat) && isNum(op.lng) && (
           <MapLibreGL.MarkerView id="operator-pin" coordinate={[op.lng, op.lat]} anchor={{ x: 0.5, y: 0.5 }}>
             <OperatorPin />
