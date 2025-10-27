@@ -1,6 +1,6 @@
 import React from 'react';
 import { SocketContext } from '../../contexts/SocketProvider';
-import { ChatMessage, fetchMessages, sendMessage as httpSend } from './api';
+import { ChatMessage, fetchMessages, sendMessage } from './api';
 
 // Normalize any server payload shape into our ChatMessage shape
 function normalize(raw: any): ChatMessage | null {
@@ -30,7 +30,7 @@ export function useChat(conversationId?: string, meId: string = 'me') {
   const [typing, setTyping] = React.useState<string[]>([]);
   const seenIds = React.useRef<Set<string>>(new Set());
 
-  // Initial history (HTTP)
+  // Initial history (socket-first via api.ts; falls back to HTTP)
   React.useEffect(() => {
     if (!conversationId) return;
     let alive = true;
@@ -57,18 +57,18 @@ export function useChat(conversationId?: string, meId: string = 'me') {
   React.useEffect(() => {
     if (!socket || !conversationId) return;
 
-    // Join using several common event names (server-agnostic)
+    // Join common room aliases for compatibility with server
     socket.emit('conversation:join', { conversationId });
     socket.emit('join:conv', conversationId);
     socket.emit('join', { room: conversationId });
 
     const upsert = (raw: any) => {
-      const m = normalize(raw);
+      const m = normalize(raw?.message ?? raw);
       if (!m || m.conversationId !== conversationId) return;
       if (seenIds.current.has(String(m.id))) return;
 
-      // Replace optimistic if text/from matches and optimistic is pending
       setMessages((prev) => {
+        // replace optimistic if text+from match
         const idx = prev.findIndex((x) => x.pending && x.text === m.text && x.from === m.from);
         const next = prev.slice();
         if (idx >= 0) next[idx] = { ...m };
@@ -90,10 +90,9 @@ export function useChat(conversationId?: string, meId: string = 'me') {
     socket.on('message:created', upsert);
     socket.on('messageCreated', upsert);
     socket.on('message:incoming', upsert);
-
     socket.on('typing', onTyping);
 
-    // Optional "read" signal
+    // Optional "read" signal (server may ignore)
     socket.emit('messages:read', { conversationId });
 
     return () => {
@@ -114,11 +113,11 @@ export function useChat(conversationId?: string, meId: string = 'me') {
       const t = text?.trim();
       if (!t) return;
 
-      // 1) Optimistic bubble even if we don't have a real conversation id yet
+      // optimistic bubble
       const tempId = `tmp_${Math.random().toString(36).slice(2, 10)}`;
       const optimistic: ChatMessage = {
         id: tempId,
-        tempId,
+        tempId: tempId as any,
         conversationId: conversationId ?? 'local',
         from: meId,
         text: t,
@@ -127,23 +126,12 @@ export function useChat(conversationId?: string, meId: string = 'me') {
       } as any;
       setMessages((prev) => [...prev, optimistic].sort(byTimeAsc));
 
-      // 2) If we have a real conversation id, try to persist; otherwise stay UI-only
       if (conversationId) {
         try {
-          const serverMsg = await httpSend(conversationId, t);
-          const norm = normalize(serverMsg);
-          if (norm) {
-            setMessages((prev) => {
-              const idx = prev.findIndex((m) => m.id === tempId);
-              const next = prev.slice();
-              if (idx >= 0) next[idx] = { ...norm, pending: false } as any;
-              else next.push(norm);
-              seenIds.current.add(String(norm.id));
-              return next.sort(byTimeAsc);
-            });
-          }
+          // socket-first send; UI will be reconciled by 'message:new' event
+          await sendMessage(conversationId, t);
         } catch {
-          // mark optimistic as failed but keep visible
+          // mark as failed but keep visible
           setMessages((prev) => {
             const idx = prev.findIndex((m) => m.id === tempId);
             if (idx < 0) return prev;
@@ -152,13 +140,9 @@ export function useChat(conversationId?: string, meId: string = 'me') {
             return next;
           });
         }
-
-        // 3) Also emit via socket if connected
-        socket?.emit?.('newMessage', { conversationId, text: t, tempId });
-        socket?.emit?.('message:send', { conversationId, text: t, tempId });
       }
     },
-    [socket, conversationId, meId]
+    [conversationId, meId]
   );
 
   const setIsTyping = React.useCallback(

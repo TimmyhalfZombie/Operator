@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import Constants from 'expo-constants';
 import MapLibreRouteMap from '../../navigation/RouteMap';
 import { fetchRoute } from '../../navigation/api';
 import AcceptedRequestCard from '../../../components/AcceptedRequestCard';
+import { API_URL } from '../../../lib/env';
 
 type Params = {
   clientLat?: string;
   clientLng?: string;
-  // Optional details for the accepted UI
   clientName?: string;
   placeName?: string;
   address?: string;
@@ -27,22 +26,18 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-const extra: any =
-  (Constants as any)?.expoConfig?.extra ??
-  (Constants as any)?.manifest?.extra ??
-  {};
-
-const API_BASE = (
-  (process.env.EXPO_PUBLIC_API_BASE as string) ||
-  (extra?.API_BASE as string) ||
-  ''
-).replace(/\/$/, '');
-
-const OP_LOC_URL = API_BASE ? `${API_BASE}/api/users/me/location` : `/api/users/me/location`;
-
 async function fetchOperatorLocation(): Promise<OperatorLocation | null> {
   try {
-    const r = await fetch(OP_LOC_URL, { method: 'GET', credentials: 'include' as any });
+    const { tokens } = await import('../../../auth/tokenStore');
+    const accessToken = await tokens.getAccessAsync();
+
+    const r = await fetch(`${API_URL}/api/users/me/location`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+    });
     if (!r.ok) return null;
     const j = await r.json();
     const lat = num(j?.lat);
@@ -63,19 +58,17 @@ export default function RoutePreviewScreen() {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
-  const [from, setFrom] = useState<LatLng | null>(null); // operator (from appdb)
-  const [to, setTo] = useState<LatLng | null>(null);     // client (from params)
+  const [from, setFrom] = useState<LatLng | null>(null);
+  const [to,   setTo]   = useState<LatLng | null>(null);
   const [line, setLine] = useState<LatLng[]>([]);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        // 1) Get operator location from appdb
         const op = await fetchOperatorLocation();
         if (!op) throw new Error('Operator location unavailable');
 
-        // 2) Resolve client coordinates from params (fallback to operator if missing)
         const latParam = num(clientLat);
         const lngParam = num(clientLng);
         const client: LatLng =
@@ -85,22 +78,17 @@ export default function RoutePreviewScreen() {
         setFrom(op);
         setTo(client);
 
-        // 3) Fetch a driving route between operator and client
         try {
           const r = await fetchRoute(op, client, 'drive');
           if (mounted && r?.points) setLine(r.points);
-        } catch {
-          // route optional; keep silent if it fails
-        }
+        } catch {}
       } catch (e: any) {
         if (mounted) setErr(e?.message || 'Failed to load route');
       } finally {
         if (mounted) setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [clientLat, clientLng]);
 
   if (loading) {
@@ -121,10 +109,7 @@ export default function RoutePreviewScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Map absolutely fills the screen */}
       <MapLibreRouteMap from={from} to={to} line={line} style={StyleSheet.absoluteFillObject} />
-
-      {/* Accepted-state card overlays the map */}
       <AcceptedRequestCard
         clientName={clientName || 'Customer'}
         placeName={placeName || 'Destination'}
@@ -133,12 +118,8 @@ export default function RoutePreviewScreen() {
         plateNumber={plateNumber}
         phone={phone}
         otherInfo={otherInfo}
-        onRepaired={() => {
-          // TODO: call your "complete" API
-        }}
-        onCancelPress={() => {
-          // TODO: call your "cancel/end" API
-        }}
+        onRepaired={() => {}}
+        onCancelPress={() => {}}
         absolute
         bottomOffset={12}
       />

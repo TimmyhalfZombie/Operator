@@ -1,21 +1,21 @@
-// client/components/GeoapifyMap.tsx
 import MapLibreGL from '@maplibre/maplibre-react-native';
-import Constants from 'expo-constants';
 import React from 'react';
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { GEOAPIFY_KEY } from '../constants/geo';
+import {
+  GEOAPIFY_KEY,              // alias to MapTiler key
+  MAPTILER_RASTER_TILES_512, // correct 512 template (no /512/ in path)
+  OSM_RASTER_TILES_256,
+  geoapifyRouteURL,
+} from '../constants/geo';
+import { API_URL } from '../lib/env';
 import UserPin from './ClientPin';
 import OperatorPin from './OperatorPin';
 
 type Props = {
-  /** Client/customer latitude */
   lat?: number | null;
-  /** Client/customer longitude */
   lng?: number | null;
   zoom?: number;
-  /** If provided, overrides the container style. */
   style?: StyleProp<ViewStyle>;
-  /** Show operator pin only if request is accepted */
   showOperator?: boolean;
 };
 
@@ -25,95 +25,50 @@ function isNum(v: any): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-const extra: any =
-  (Constants as any)?.expoConfig?.extra ??
-  (Constants as any)?.manifest?.extra ??
-  {};
-
-const API_ROOT = 'http://192.168.1.6:3000'; // Use actual IP address
-
-// Final URL used to fetch operator location from server
-const OP_LOC_URL = API_ROOT ? `${API_ROOT}/api/users/me/location` : `/api/users/me/location`;
-
-console.log('API_ROOT:', API_ROOT);
-console.log('OP_LOC_URL:', OP_LOC_URL);
-
 MapLibreGL.setAccessToken(null);
 
-async function testGeoapifyKey(key: string): Promise<boolean> {
-  if (!key) return false;
-  try {
-    const u = `https://maps.geoapify.com/v1/tile/osm-carto/1/1/1.png?apiKey=${key}`;
-    const r = await fetch(u, { method: 'GET' });
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
+// Toggle later if your network allows vector tiles/sprites/glyphs
+const USE_VECTOR = false;
+// Streets v4 vector style (used only if USE_VECTOR=true)
+const VECTOR_STYLE_URL =
+  'https://api.maptiler.com/maps/streets-v4/style.json?key=2qSQ9pofebFXsJIh7Nog';
 
-/** Fetch the operator (current user) location from appdb */
+// Empty style used whenever we render raster tiles
+const EMPTY_STYLE_JSON = JSON.stringify({ version: 8, sources: {}, layers: [] });
+
 async function fetchOperatorLocation(): Promise<OperatorLocation | null> {
   try {
-    console.log('Fetching operator location from:', OP_LOC_URL);
-    
-    // Get auth token
     const { tokens } = await import('../auth/tokenStore');
     const accessToken = await tokens.getAccessAsync();
-    
-    if (!accessToken) {
-      console.log('No access token available for operator location fetch');
-      return null;
-    }
-    
-    const res = await fetch(OP_LOC_URL, { 
-      method: 'GET', 
+    const res = await fetch(`${API_URL}/api/users/me/location`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
-      }
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
     });
-    
-    console.log('Operator location response status:', res.status);
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.log('Operator location fetch failed:', res.status, res.statusText, errorText);
-      return null;
-    }
-    
+    if (!res.ok) return null;
     const j = await res.json();
-    console.log('Operator location response:', j);
-    
-    if (!isNum(j?.lat) || !isNum(j?.lng)) {
-      console.log('Invalid operator location data:', j);
-      return null;
-    }
-    
-    const location = { lat: j.lat, lng: j.lng, updated_at: j.updated_at };
-    console.log('Operator location found:', location);
-    return location;
-  } catch (error) {
-    console.error('Error fetching operator location:', error);
+    if (!isNum(j?.lat) || !isNum(j?.lng)) return null;
+    return { lat: j.lat, lng: j.lng, updated_at: j?.updated_at };
+  } catch {
     return null;
   }
 }
 
-/** Fetch a driving route (Geoapify) between two points, returns a GeoJSON FeatureCollection */
 async function fetchDriveRoute(
   fromLng: number,
   fromLat: number,
   toLng: number,
   toLat: number,
-  apiKey: string
+  _apiKey: string
 ): Promise<any | null> {
-  if (!apiKey) return null;
   try {
-    const url =
-      `https://api.geoapify.com/v1/routing?waypoints=${fromLng},${fromLat}|${toLng},${toLat}&mode=drive&apiKey=${apiKey}`;
+    const url = geoapifyRouteURL(fromLng, fromLat, toLng, toLat, 'drive');
     const r = await fetch(url);
+    if (!r.ok) return null;
     const j = await r.json();
-    const feat = j?.features?.[0];
-    return feat ? { type: 'FeatureCollection', features: [feat] } : null;
+    return j?.type ? j : null; // FeatureCollection
   } catch {
     return null;
   }
@@ -121,78 +76,101 @@ async function fetchDriveRoute(
 
 export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator = true }: Props) {
   const clientOk = isNum(lat) && isNum(lng);
-  const [useGeoapify, setUseGeoapify] = React.useState(false);
+  const clientCenter: [number, number] = [lng ?? 0, lat ?? 0];
 
-  // Operator location (from appdb)
+  // Force raster unless you enable vector above
+  const [mode, setMode] = React.useState<'vector' | 'raster-mt' | 'raster-osm'>(USE_VECTOR ? 'vector' : 'raster-mt');
+  const [mapReady, setMapReady] = React.useState(mode !== 'vector'); // raster usable immediately
+
   const [op, setOp] = React.useState<OperatorLocation | null>(null);
-  // Route feature collection between operator and client
   const [routeFC, setRouteFC] = React.useState<any | null>(null);
 
-  // Use OSM tiles as fallback to avoid timeout issues
-  React.useEffect(() => {
-    console.log('GEOAPIFY_KEY value:', GEOAPIFY_KEY);
-    console.log('Using OSM tiles to avoid timeout issues');
-    setUseGeoapify(false); // Force OSM tiles
+  // Camera + guards (auto-zoom once, then never again after user interaction)
+  const camRef = React.useRef<MapLibreGL.Camera>(null);
+  const didInitView = React.useRef(false);
+  const didFitTwoPoints = React.useRef(false);
+  const userHasTakenControl = React.useRef(false);
+
+  const onRegionWillChange = React.useCallback((e: any) => {
+    const p = e?.nativeEvent?.properties ?? e?.properties ?? {};
+    const byUser = p?.gesture === true || p?.isUserInteraction === true || p?.manualGesture === true;
+    if (byUser) userHasTakenControl.current = true;
   }, []);
 
-  // Poll operator location from server every 5 seconds (only if showOperator is true)
+  // Vector: ready after style loads; Raster: ready now
+  const onStyleLoaded = () => setMapReady(true);
+
+  // Ignore harmless “Canceled”; only fallback for real failures
+  const onMapError = (e: any) => {
+    const msg = String(e?.nativeEvent?.message || '');
+    const shouldFallback =
+      /401|403|404|429|5\d\d|Unauthorized|Forbidden|Not Found|Too Many/i.test(msg);
+    if (!shouldFallback) {
+      console.log('Map error (ignored):', msg);
+      return;
+    }
+    console.log('Map error (fallback to raster):', msg);
+    setMapReady(true);
+    setMode('raster-mt');
+  };
+
+  // Poll operator (for the red pin)
   React.useEffect(() => {
-    console.log('showOperator changed:', showOperator);
-    
     if (!showOperator) {
-      console.log('showOperator is false, clearing operator location');
       setOp(null);
       return;
     }
-
-    console.log('showOperator is true, starting operator location polling');
     let alive = true;
     let t: any;
-
     async function tick() {
-      console.log('Polling operator location...');
       const loc = await fetchOperatorLocation();
-      if (alive) {
-        setOp(loc ?? null);
-        if (loc) {
-          console.log('Operator location updated on map:', loc);
-        } else {
-          console.log('No operator location available');
-        }
-      }
+      if (alive) setOp(loc ?? null);
       t = setTimeout(tick, 5000);
     }
-
     tick();
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
+    return () => { alive = false; clearTimeout(t); };
   }, [showOperator]);
 
-  // Fetch a route when both operator + client are available
+  // Route fetch (no camera move)
   React.useEffect(() => {
     let cancelled = false;
-
     (async () => {
       if (!clientOk || !op) {
         if (!cancelled) setRouteFC(null);
         return;
       }
-      console.log('Fetching route from operator to client...');
-      console.log('Operator:', op);
-      console.log('Client:', { lat, lng });
-      const fc = await fetchDriveRoute(op.lng, op.lat, lng!, lat!, GEOAPIFY_KEY);
-      if (!cancelled) {
-        setRouteFC(fc);
-        console.log('Route result:', fc ? 'Success - Green line should appear' : 'Failed - No route');
-      }
+      const fc = await fetchDriveRoute(op.lng, op.lat, clientCenter[0], clientCenter[1], GEOAPIFY_KEY);
+      if (!cancelled) setRouteFC(fc);
     })();
+    return () => { cancelled = true; };
+  }, [clientOk, op?.lat, op?.lng, clientCenter[0], clientCenter[1]]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [clientOk, op?.lat, op?.lng, lat, lng]);
+  // Auto-zoom once (or fit both once) before user interaction
+  React.useEffect(() => {
+    if (!mapReady || !clientOk || userHasTakenControl.current) return;
+
+    if (!op && !didInitView.current) {
+      didInitView.current = true;
+      // Delay a tick to avoid racing initial map render
+      setTimeout(() => {
+        camRef.current?.setCamera?.({
+          centerCoordinate: clientCenter,
+          zoomLevel: zoom,
+          animationDuration: 400,
+          animationMode: 'flyTo',
+        } as any);
+      }, 50);
+    }
+
+    if (op && !didFitTwoPoints.current) {
+      const sw: [number, number] = [Math.min(op.lng, clientCenter[0]), Math.min(op.lat, clientCenter[1])];
+      const ne: [number, number] = [Math.max(op.lng, clientCenter[0]), Math.max(op.lat, clientCenter[1])];
+      setTimeout(() => {
+        camRef.current?.fitBounds?.(sw, ne, 60, 800);
+      }, 50);
+      didFitTwoPoints.current = true;
+    }
+  }, [mapReady, clientOk, op?.lat, op?.lng, clientCenter[0], clientCenter[1], zoom]);
 
   if (!clientOk) {
     return (
@@ -202,38 +180,6 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator =
     );
   }
 
-  // MapLibre expects [lng, lat]
-  const clientCenter: [number, number] = [lng!, lat!];
-
-  // Geoapify raster tiles (no vector style URL so we avoid font/glyph endpoints).
-  const geoapifyTiles = [
-    `https://maps.geoapify.com/v1/tile/osm-carto/{z}/{x}/{y}.png?apiKey=${GEOAPIFY_KEY}`,
-  ];
-  // Fallback: OSM raster tiles
-  const osmTiles = ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'];
-  const tiles = useGeoapify ? geoapifyTiles : osmTiles;
-  const maxZoom = useGeoapify ? 20 : 19;
-  
-  console.log('Map tile configuration:', {
-    useGeoapify,
-    tileUrl: tiles[0],
-    maxZoom
-  });
-
-  // Only set bounds on initial load, not on every render
-  const [initialBounds, setInitialBounds] = React.useState<any>(null);
-  
-  React.useEffect(() => {
-    if (op && !initialBounds) {
-      setInitialBounds({
-        sw: [Math.min(op.lng, lng!), Math.min(op.lat, lat!)],
-        ne: [Math.max(op.lng, lng!), Math.max(op.lat, lat!)],
-        padding: 60,
-        animationDuration: 800,
-      });
-    }
-  }, [op, lng, lat, initialBounds]);
-
   return (
     <View style={[styles.wrap, style ?? styles.defaultSize]}>
       <MapLibreGL.MapView
@@ -241,87 +187,57 @@ export default function GeoapifyMap({ lat, lng, zoom = 16, style, showOperator =
         compassEnabled={false}
         logoEnabled={false}
         attributionEnabled={false}
+        onRegionWillChange={onRegionWillChange}
+        onDidFinishLoadingStyle={onStyleLoaded}
+        onMapError={onMapError}
+        {...(mode === 'vector'
+          ? { styleURL: VECTOR_STYLE_URL }
+          : { styleJSON: EMPTY_STYLE_JSON })}
       >
-        {initialBounds ? (
-          <MapLibreGL.Camera bounds={initialBounds} />
-        ) : (
-          <MapLibreGL.Camera
-            centerCoordinate={clientCenter}
-            zoomLevel={zoom}
-            animationMode="flyTo"
-            animationDuration={400}
-          />
+        <MapLibreGL.Camera ref={camRef as any} />
+
+        {/* Base raster tiles when not in vector mode */}
+        {mode !== 'vector' && (
+          <MapLibreGL.RasterSource
+            id="custom-base"
+            tileUrlTemplates={mode === 'raster-mt' ? MAPTILER_RASTER_TILES_512 : OSM_RASTER_TILES_256}
+            tileSize={mode === 'raster-mt' ? 512 : 256}
+            minZoomLevel={0}
+            maxZoomLevel={19}
+          >
+            <MapLibreGL.RasterLayer id="custom-base-layer" />
+          </MapLibreGL.RasterSource>
         )}
 
-        {/* Base raster tiles */}
-        <MapLibreGL.RasterSource
-          id="base"
-          tileUrlTemplates={tiles}
-          tileSize={256}
-          minZoomLevel={0}
-          maxZoomLevel={maxZoom}
-        >
-          <MapLibreGL.RasterLayer id="base-layer" />
-        </MapLibreGL.RasterSource>
-
-        {/* Route line on top (if available) */}
+        {/* Optional route overlay */}
         {routeFC && (
-          <MapLibreGL.ShapeSource id="route" shape={routeFC}>
+          <MapLibreGL.ShapeSource id="custom-route" shape={routeFC}>
             <MapLibreGL.LineLayer
-              id="route-line"
-              style={{
-                lineColor: '#6EFF87',
-                lineWidth: 5,
-                lineCap: 'round',
-                lineJoin: 'round',
-                lineOpacity: 0.95,
-              }}
+              id="custom-route-line"
+              style={{ lineColor: '#6EFF87', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.95 }}
             />
           </MapLibreGL.ShapeSource>
         )}
 
-        {/* Client pin (blue pulsing) */}
-        <MapLibreGL.MarkerView
-          id="client-pin"
-          coordinate={clientCenter}
-          anchor={{ x: 0.5, y: 1.0 }}
-        >
+        {/* Client pin */}
+        <MapLibreGL.MarkerView id="client-pin" coordinate={clientCenter} anchor={{ x: 0.5, y: 1.0 }}>
           <UserPin />
         </MapLibreGL.MarkerView>
 
-        {/* Operator pin (red) from appdb - only show if showOperator is true */}
+        {/* Operator pin */}
         {showOperator && op && isNum(op.lat) && isNum(op.lng) && (
-          <MapLibreGL.MarkerView
-            id="operator-pin"
-            coordinate={[op.lng, op.lat]}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
+          <MapLibreGL.MarkerView id="operator-pin" coordinate={[op.lng, op.lat]} anchor={{ x: 0.5, y: 0.5 }}>
             <OperatorPin />
           </MapLibreGL.MarkerView>
         )}
-        
-        {/* Debug info */}
-        {console.log('Map render - showOperator:', showOperator, 'op:', op, 'op.lat:', op?.lat, 'op.lng:', op?.lng)}
       </MapLibreGL.MapView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    overflow: 'hidden',
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    backgroundColor: '#000',
-  },
-  /**
-   * ⬇️ FIX: make the default fill its parent instead of a fixed height.
-   * Any screen that just does `<GeoapifyMap />` will now stretch the map.
-   */
+  wrap: { overflow: 'hidden', borderTopLeftRadius: 12, borderTopRightRadius: 12, backgroundColor: '#000' },
   defaultSize: { flex: 1, width: '100%' },
-
-  // (Only used when lat/lng are missing)
   placeholder: { alignItems: 'center', justifyContent: 'center' },
   placeholderText: { color: '#aaa' },
-
 });

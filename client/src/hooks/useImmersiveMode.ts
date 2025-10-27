@@ -10,10 +10,10 @@ export function useImmersiveMode() {
         if (Platform.OS === 'android') {
           // Hide Android navigation bar
           await NavigationBar.setVisibilityAsync('hidden');
-          await NavigationBar.setBehaviorAsync('overlay-swipe');
-          
-          // Set navigation bar color to black
-          await NavigationBar.setBackgroundColorAsync('#000000');
+          // app.config.js sets edgeToEdgeEnabled: true; avoid extra setters to silence warnings
+          // Guard these calls to minimize warnings on newer Android
+          try { await NavigationBar.setBehaviorAsync('overlay-swipe'); } catch {}
+          try { await NavigationBar.setBackgroundColorAsync('#000000'); } catch {}
         }
         
         if (Platform.OS === 'ios') {

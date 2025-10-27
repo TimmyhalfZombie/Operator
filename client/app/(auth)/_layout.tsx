@@ -18,7 +18,7 @@ export default function AuthLayout() {
 
       {/* Loading screen shown after first create-account */}
       <Stack.Screen
-        name="patching-up"
+        name="patchup"
         options={{
           headerShown: false,
           animation: "fade", // quick in/out, feels like a splash

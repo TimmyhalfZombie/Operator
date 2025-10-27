@@ -190,7 +190,6 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       if (d.status === 'completed' && d.completedBy) {
         try {
           const operator = await customerDb.collection('operators').findOne({ user_id: String(d.completedBy) });
-          console.log('Found operator for completedBy:', operator);
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
@@ -214,7 +213,6 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
         try {
           const operatorId = d.assignedTo || d.acceptedBy;
           const operator = await customerDb.collection('operators').findOne({ user_id: String(operatorId) });
-          console.log('Found operator for assignedTo/acceptedBy:', operator);
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;

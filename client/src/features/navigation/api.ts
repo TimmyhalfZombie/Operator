@@ -1,76 +1,41 @@
-import { api } from '../../lib/http';
+// client/src/features/navigation/api.ts
+import { API_URL } from '../../lib/env';
 
-export type RouteResult = {
-  points: { lat: number; lng: number }[];
-  distanceMeters: number;
-  durationSec: number;
-};
+export type LatLng = { lat: number; lng: number };
 
+export async function fetchClientLocation(userId: string): Promise<LatLng> {
+  const { tokens } = await import('../../auth/tokenStore');
+  const accessToken = await tokens.getAccessAsync();
+  const r = await fetch(`${API_URL}/api/users/${encodeURIComponent(userId)}/location`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+  if (!r.ok) throw new Error('Client location fetch failed');
+  const j = await r.json();
+  const lat = Number(j?.lat);
+  const lng = Number(j?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error('Invalid client location');
+  return { lat, lng };
+}
+
+/** Keep the same return shape used by your screen (points: LatLng[]) */
 export async function fetchRoute(
-  from: { lat: number; lng: number },
-  to: { lat: number; lng: number },
-  mode: 'drive' | 'walk' | 'bicycle' = 'drive'
-): Promise<RouteResult> {
-  const q = `from=${from.lat},${from.lng}&to=${to.lat},${to.lng}&mode=${mode}`;
-  return api(`/api/geo/route?${q}`, { auth: true });
-}
-
-export type PlaceItem = {
-  id: string;
-  name: string;
-  category: string;
-  lat: number;
-  lng: number;
-  address: string;
-};
-
-export async function fetchNearby(
-  lat: number,
-  lng: number,
-  categories = 'fuel,service.vehicle.repair',
-  radius = 2000
-): Promise<{ items: PlaceItem[] }> {
-  const q = `lat=${lat}&lng=${lng}&categories=${encodeURIComponent(categories)}&radius=${radius}`;
-  return api(`/api/geo/places?${q}`, { auth: true });
-}
-
-/* ---------------- NEW: client location helpers ---------------- */
-
-export type ClientLocation = { lat: number; lng: number };
-export type LatLng = ClientLocation;
-
-function normLoc(v: any): ClientLocation | null {
-  if (!v) return null;
-  if (typeof v.lat === 'number' && typeof v.lng === 'number') return { lat: v.lat, lng: v.lng };
-  if (v.location && typeof v.location.lat === 'number' && typeof v.location.lng === 'number') {
-    return { lat: v.location.lat, lng: v.location.lng };
-  }
-  if (Array.isArray(v.coordinates) && v.coordinates.length >= 2) {
-    return { lat: Number(v.coordinates[1]), lng: Number(v.coordinates[0]) };
-  }
-  if (v.geo && typeof v.geo.lat === 'number' && typeof v.geo.lng === 'number') {
-    return { lat: v.geo.lat, lng: v.geo.lng };
-  }
-  return null;
-}
-
-/** Tries common endpoints/shapes and returns {lat,lng}. Adjust paths if needed. */
-export async function fetchClientLocation(clientId: string): Promise<ClientLocation> {
-  const paths = [
-    `/api/clients/${clientId}/location`,
-    `/api/users/${clientId}/location`,
-    `/api/clients/${clientId}`,
-    `/api/users/${clientId}`,
-  ];
-
-  for (const p of paths) {
-    try {
-      const j = await api(p, { auth: true });
-      const loc = normLoc(j) || normLoc(j?.data) || normLoc(j?.result);
-      if (loc) return loc;
-    } catch {
-      // try next
-    }
-  }
-  throw new Error('Client location not found');
+  from: LatLng,
+  to: LatLng,
+  mode: 'drive' | 'walk' | 'bicycle' | 'transit' = 'drive'
+): Promise<{ points: LatLng[] } | null> {
+  const m = mode === 'walk' ? 'foot' : mode === 'bicycle' ? 'bike' : 'drive';
+  const qs = new URLSearchParams({
+    from: `${from.lng},${from.lat}`,
+    to: `${to.lng},${to.lat}`,
+    mode: m,
+  });
+  const r = await fetch(`${API_URL}/api/geo/route?${qs.toString()}`);
+  if (!r.ok) return null;
+  const j = await r.json();
+  const coords: [number, number][] | undefined = j?.features?.[0]?.geometry?.coordinates;
+  if (!Array.isArray(coords)) return null;
+  return { points: coords.map(([lng, lat]) => ({ lat, lng })) };
 }
