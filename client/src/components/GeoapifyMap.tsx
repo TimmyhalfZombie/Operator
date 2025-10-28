@@ -1,28 +1,18 @@
+// client/src/components/GeoapifyMap.tsx
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import React from 'react';
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import {
-    GEOAPIFY_KEY, // alias to MapTiler key
-    MAPTILER_RASTER_TILES_512, // correct 512 template (no /512/ in path)
-    OSM_RASTER_TILES_256,
-    geoapifyRouteURL,
-} from '../constants/geo';
-import { API_URL } from '../lib/env';
+import { GEOAPIFY_KEY } from '../constants/geo';
+import { http } from '../lib/http';
 import UserPin from './ClientPin';
 import OperatorPin from './OperatorPin';
 
 type Props = {
-  /** Client latitude */
   lat?: number | null;
-  /** Client longitude */
   lng?: number | null;
-  /** Initial zoom when auto-centering to client */
   zoom?: number;
-  /** Optional container style */
   style?: StyleProp<ViewStyle>;
-  /** Show operator pin or not */
   showOperator?: boolean;
-  /** Disable initial auto-zoom/fit behavior */
   disableAutoZoom?: boolean;
 };
 
@@ -34,42 +24,34 @@ function isNum(v: any): v is number {
 
 MapLibreGL.setAccessToken(null);
 
-// Empty style we use while drawing raster tiles
-const EMPTY_STYLE_JSON = JSON.stringify({ version: 8, sources: {}, layers: [] });
-
+// Fetch the operator (current user) location (server returns from appdb.users)
 async function fetchOperatorLocation(): Promise<OperatorLocation | null> {
   try {
-    const { tokens } = await import('../auth/tokenStore');
-    const accessToken = await tokens.getAccessAsync();
-    const res = await fetch(`${API_URL}/api/users/me/location`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
-    });
-    if (!res.ok) return null;
-    const j = await res.json();
-    if (!isNum(j?.lat) || !isNum(j?.lng)) return null;
-    return { lat: j.lat, lng: j.lng, updated_at: j?.updated_at };
+    // http.get returns parsed JSON directly (see http.ts)
+    const data = await http.get('/users/me/location', { auth: true });
+    if (!isNum((data as any)?.lat) || !isNum((data as any)?.lng)) return null;
+    return { lat: (data as any).lat, lng: (data as any).lng, updated_at: (data as any).updated_at };
   } catch {
     return null;
   }
 }
 
+/** Fetch a driving route (Geoapify) between two points, returns a GeoJSON FeatureCollection */
 async function fetchDriveRoute(
   fromLng: number,
   fromLat: number,
   toLng: number,
   toLat: number,
-  _apiKey: string
+  apiKey: string
 ): Promise<any | null> {
+  if (!apiKey) return null;
   try {
-    const url = geoapifyRouteURL(fromLng, fromLat, toLng, toLat, 'drive');
+    const url = `https://api.geoapify.com/v1/routing?waypoints=${fromLng},${fromLat}|${toLng},${toLat}&mode=drive&apiKey=${apiKey}`;
     const r = await fetch(url);
     if (!r.ok) return null;
     const j = await r.json();
-    return j?.type ? j : null; // FeatureCollection
+    const feat = j?.features?.[0];
+    return feat ? { type: 'FeatureCollection', features: [feat] } : null;
   } catch {
     return null;
   }
@@ -86,29 +68,22 @@ export default function GeoapifyMap({
   const clientOk = isNum(lat) && isNum(lng);
   const clientCenter: [number, number] = [lng ?? 0, lat ?? 0];
 
-  // We force raster for stability
-  const [mode] = React.useState<'raster-mt' | 'raster-osm'>('raster-mt');
   const [mapReady, setMapReady] = React.useState(false);
-
   const [op, setOp] = React.useState<OperatorLocation | null>(null);
   const [routeFC, setRouteFC] = React.useState<any | null>(null);
 
-  // Camera (imperative) + guards
   const camRef = React.useRef<MapLibreGL.Camera>(null);
   const userHasTakenControl = React.useRef(false);
-  const lastAutoCentered = React.useRef<string | null>(null); // `${lng},${lat}` we auto-centered to
+  const lastAutoCentered = React.useRef<string | null>(null);
   const autoZoomRetryRef = React.useRef(0);
 
   const onRegionWillChange = React.useCallback((e: any) => {
     const p = e?.nativeEvent?.properties ?? e?.properties ?? {};
-    const byUser =
-      p?.gesture === true ||
-      p?.isUserInteraction === true ||
-      p?.manualGesture === true;
+    const byUser = p?.gesture || p?.isUserInteraction || p?.manualGesture;
     if (byUser) userHasTakenControl.current = true;
   }, []);
 
-  // Poll operator pin (optional)
+  // Poll operator location
   React.useEffect(() => {
     if (!showOperator) {
       setOp(null);
@@ -122,10 +97,13 @@ export default function GeoapifyMap({
       t = setTimeout(tick, 5000);
     }
     tick();
-    return () => { alive = false; clearTimeout(t); };
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
   }, [showOperator]);
 
-  // Fetch route (optional overlay)
+  // Route overlay when both ends exist
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -136,27 +114,26 @@ export default function GeoapifyMap({
       const fc = await fetchDriveRoute(op.lng, op.lat, clientCenter[0], clientCenter[1], GEOAPIFY_KEY);
       if (!cancelled) setRouteFC(fc);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [clientOk, op?.lat, op?.lng, clientCenter[0], clientCenter[1]]);
 
-  // 🔸 Auto-zoom or auto-fit ONCE on first render (unless disabled)
+  // One-time auto-zoom / fit-bounds
   React.useEffect(() => {
     if (disableAutoZoom) return;
     if (!mapReady || !clientOk) return;
+    const key =
+      showOperator && op && isNum(op.lat) && isNum(op.lng)
+        ? `${clientCenter[0]},${clientCenter[1]}|${op.lng},${op.lat}`
+        : `${clientCenter[0]},${clientCenter[1]}`;
 
-    // Build a key representing the current target view so we only run once per target
-    const key = showOperator && op && isNum(op.lat) && isNum(op.lng)
-      ? `${clientCenter[0]},${clientCenter[1]}|${op.lng},${op.lat}`
-      : `${clientCenter[0]},${clientCenter[1]}`;
-
-    if (userHasTakenControl.current) return; // don't override user gesture
-    if (lastAutoCentered.current === key) return; // already centered to this target
+    if (userHasTakenControl.current) return;
+    if (lastAutoCentered.current === key) return;
 
     lastAutoCentered.current = key;
 
-    // small delay + retry loop avoids racing first render/camera mount
     const doZoom = () => {
-      const hasOperator = showOperator && op && isNum(op.lat) && isNum(op.lng);
       const cam = camRef.current as any;
       if (!cam) {
         if (autoZoomRetryRef.current < 10) {
@@ -165,7 +142,8 @@ export default function GeoapifyMap({
         }
         return;
       }
-      if (hasOperator && cam.fitBounds) {
+      const hasOp = showOperator && op && isNum(op.lat) && isNum(op.lng);
+      if (hasOp && cam.fitBounds) {
         const sw: [number, number] = [
           Math.min(clientCenter[0], (op as OperatorLocation).lng),
           Math.min(clientCenter[1], (op as OperatorLocation).lat),
@@ -196,6 +174,8 @@ export default function GeoapifyMap({
     );
   }
 
+  const osmTiles = ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'];
+
   return (
     <View style={[styles.wrap, style ?? styles.defaultSize]}>
       <MapLibreGL.MapView
@@ -205,33 +185,13 @@ export default function GeoapifyMap({
         attributionEnabled={false}
         onRegionWillChange={onRegionWillChange}
         onDidFinishLoadingStyle={() => setMapReady(true)}
-        onMapError={(e) => {
-          const msg = String(e?.nativeEvent?.message || '');
-          // ignore harmless "Canceled" during zoom/pan
-          const realFail = /401|403|404|429|5\d\d|Unauthorized|Forbidden|Not Found|Too Many/i.test(msg);
-          if (!realFail) {
-            console.log('Map error (ignored):', msg);
-            return;
-          }
-          console.log('Map error:', msg);
-        }}
-        // Raster mode: provide empty vector style JSON
-        styleJSON={EMPTY_STYLE_JSON}
       >
         <MapLibreGL.Camera ref={camRef as any} />
 
-        {/* Base raster tiles */}
-        <MapLibreGL.RasterSource
-          id="base"
-          tileUrlTemplates={mode === 'raster-mt' ? MAPTILER_RASTER_TILES_512 : OSM_RASTER_TILES_256}
-          tileSize={mode === 'raster-mt' ? 512 : 256}
-          minZoomLevel={0}
-          maxZoomLevel={19}
-        >
+        <MapLibreGL.RasterSource id="base" tileUrlTemplates={osmTiles} tileSize={256} minZoomLevel={0} maxZoomLevel={19}>
           <MapLibreGL.RasterLayer id="base-layer" />
         </MapLibreGL.RasterSource>
 
-        {/* Optional route overlay */}
         {routeFC && (
           <MapLibreGL.ShapeSource id="route" shape={routeFC}>
             <MapLibreGL.LineLayer
@@ -241,12 +201,10 @@ export default function GeoapifyMap({
           </MapLibreGL.ShapeSource>
         )}
 
-        {/* Client pin (blue) */}
         <MapLibreGL.MarkerView id="client-pin" coordinate={clientCenter} anchor={{ x: 0.5, y: 1.0 }}>
           <UserPin />
         </MapLibreGL.MarkerView>
 
-        {/* Operator pin (red) */}
         {showOperator && op && isNum(op.lat) && isNum(op.lng) && (
           <MapLibreGL.MarkerView id="operator-pin" coordinate={[op.lng, op.lat]} anchor={{ x: 0.5, y: 0.5 }}>
             <OperatorPin />

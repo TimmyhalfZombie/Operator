@@ -24,7 +24,6 @@ export function useActivity() {
     try {
       const data = await fetchOperatorInbox({ limit: 100 });
       setItems(data);
-      // removed noisy debug log
       if (!silent) setError(null);
     } catch (e) {
       if (!silent) {
@@ -78,25 +77,15 @@ export function useActivity() {
   // Split into "New" (pending), "Ongoing" (accepted but not completed), and "Recent" (completed/other)
   // Hide requests that this operator has declined locally, but keep database status as pending
   const newItems = useMemo(() => 
-    items.filter(i => 
-      (i.status || 'pending') === 'pending' && 
-      !declinedIds.has(i.id)
-    ), [items, declinedIds]
+    items.filter(i => (i.status || 'pending') === 'pending'), [items]
   );
   
   const ongoingItems = useMemo(() => 
-    items.filter(i => 
-      (i.status || 'pending') === 'accepted' &&
-      !declinedIds.has(i.id)
-    ), [items, declinedIds]
+    items.filter(i => (i.status || 'pending') === 'accepted'), [items]
   );
   
   const recentItems = useMemo(() => 
-    items.filter(i => 
-      (i.status || 'pending') !== 'pending' &&
-      (i.status || 'pending') !== 'accepted' &&
-      !declinedIds.has(i.id)
-    ), [items, declinedIds]
+    items.filter(i => (i.status || 'pending') !== 'pending' && (i.status || 'pending') !== 'accepted'), [items]
   );
 
   return { items, newItems, ongoingItems, recentItems, loading, error, markAsDeclined, reload: () => load(false) };

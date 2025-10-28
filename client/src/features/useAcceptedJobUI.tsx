@@ -6,6 +6,7 @@ import AcceptedRequestCard from '../components/AcceptedRequestCard';
 import { completeAssist, getAssistById } from '../features/assistance/api';
 import type { AssistanceRequest } from '../features/assistance/types';
 import { saveCompleted } from '../lib/completedCache';
+import { usePostMyLocationOnInterval } from './location/useServerMyLocation';
 
 export type AcceptedJob = {
   id: string;
@@ -55,17 +56,18 @@ export default function useAcceptedJobUI(defaultBottomOffset = 12) {
 
   const close = React.useCallback(() => setState({ visible: false, job: null }), []);
 
+  // 🔴 Start posting my GPS while the accepted job UI is visible
+  usePostMyLocationOnInterval(state.visible, 5000);
+
   async function handleRepaired() {
     try {
       if (!state.job) return;
       const j = state.job;
       close();
 
-      // 1) Mark complete
       const completed = await completeAssist(j.id);
       const detailId = completed?.id || j.id;
 
-      // 2) Fetch the finalized document and cache it for later reads
       try {
         const fresh = await getAssistById(detailId);
         await saveCompleted({
@@ -91,9 +93,7 @@ export default function useAcceptedJobUI(defaultBottomOffset = 12) {
         });
       } catch {}
 
-      // 3) Navigate to the same detail screen, which can now fall back to cache
       router.push(`/activity-detail?id=${encodeURIComponent(String(detailId))}`);
-
       j.onRepaired?.();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Failed to complete request');
@@ -102,10 +102,7 @@ export default function useAcceptedJobUI(defaultBottomOffset = 12) {
 
   const element =
     state.visible && state.job ? (
-      <View
-        pointerEvents="box-none"
-        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 9999 }}
-      >
+      <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 9999 }}>
         <AcceptedRequestCard
           clientName={state.job.clientName}
           placeName={state.job.placeName}

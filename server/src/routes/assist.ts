@@ -125,7 +125,7 @@ router.get('/mine', requireAuth, async (req, res, next) => {
 
     const items = docs.map((d) => ({
       id: String(d._id),
-      status: d.status || 'pending',
+      status: typeof d.status === 'string' ? d.status.toLowerCase() : 'pending',
       vehicle: d.vehicle || null,
       location: d.location || null,
       createdAt: d.createdAt || (d as any).created_at || null,
@@ -252,7 +252,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
 
       return {
         id: String(d._id),
-        status: d.status || 'pending',
+        status: typeof d.status === 'string' ? d.status.toLowerCase() : 'pending',
         vehicle: d.vehicle || null,
         location: d.location || null,
         createdAt: d.createdAt || (d as any).created_at || null,
@@ -635,16 +635,32 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
         );
         console.log(`Updated operator ${operatorId} location: ${lat}, ${lng}`);
       } else {
-        // Just update last seen time
-        await usersColl.updateOne(
+        // No coords in body: try to copy latest known coords from this user's record
+        const existing = await usersColl.findOne(
           { _id: operatorId },
           {
-            $set: {
-              last_seen_at: new Date(),
+            projection: {
+              last_lat: 1, last_lng: 1, last_address: 1,
+              initial_lat: 1, initial_lng: 1, initial_long: 1, initial_address: 1,
             }
           }
         );
-        console.log(`Updated operator ${operatorId} last seen time`);
+
+        const fallbackLat = existing?.last_lat ?? existing?.initial_lat ?? null;
+        const fallbackLng = existing?.last_lng ?? existing?.initial_lng ?? existing?.initial_long ?? null;
+        const fallbackAddr = existing?.last_address ?? existing?.initial_address ?? null;
+
+        const setDoc: any = { last_seen_at: new Date() };
+        if (fallbackLat != null && fallbackLng != null) {
+          setDoc.last_lat = Number(fallbackLat);
+          setDoc.last_lng = Number(fallbackLng);
+          if (fallbackAddr) setDoc.last_address = fallbackAddr;
+        }
+        await usersColl.updateOne(
+          { _id: operatorId },
+          { $set: setDoc }
+        );
+        console.log(`Updated operator ${operatorId} last seen; copied coords=${fallbackLat!=null && fallbackLng!=null}`);
       }
     } catch (locationError) {
       console.error('Error updating operator location:', locationError);

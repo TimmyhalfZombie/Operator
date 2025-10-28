@@ -1,29 +1,71 @@
 import { Router } from 'express';
-import { getCustomerDb } from '../db/connect';
+import { ObjectId } from 'mongodb';
+import { getAuthDb } from '../db/connect';
 import { requireAuth } from '../middleware/requireAuth';
 
 const router = Router();
 
 /**
  * GET /api/users/me/location
+ * Source of truth: appdb.users
  * Returns { lat, lng, address, updated_at }
- * Gets operator location from operators collection
  */
 router.get('/users/me/location', requireAuth, async (req: any, res) => {
   try {
     const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+    if (!userId || !ObjectId.isValid(userId)) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
 
-    const db = getCustomerDb();
-    const operator = await db.collection('operators').findOne({ user_id: String(userId) });
+    const db = getAuthDb(); // <-- appdb
+    const users = db.collection('users');
 
-    if (!operator) return res.status(404).json({ error: 'location not found' });
-    
+    const user = await users.findOne(
+      { _id: new ObjectId(userId) },
+      {
+        projection: {
+          // prefer last_* then fall back to initial_*, tolerate common variants
+          last_lat: 1,
+          last_lng: 1,
+          last_long: 1,
+          last_address: 1,
+          last_seen_at: 1,
+          initial_lat: 1,
+          initial_lng: 1,
+          initial_long: 1,
+          inital_lat: 1,
+          inital_long: 1,
+          initial_address: 1,
+          initial_loc_at: 1,
+        },
+      }
+    );
+
+    if (!user) return res.status(404).json({ error: 'user not found' });
+
+    const lat =
+      user.last_lat ??
+      user.initial_lat ??
+      user.inital_lat ??
+      null;
+
+    const lng =
+      user.last_lng ??
+      user.last_long ??
+      user.initial_lng ??
+      user.initial_long ??
+      user.inital_long ??
+      null;
+
+    if (lat == null || lng == null) {
+      return res.status(404).json({ error: 'location not found' });
+    }
+
     return res.json({
-      lat: operator.last_lat || null,
-      lng: operator.last_lng || null,
-      address: operator.last_address || null,
-      updated_at: operator.last_seen_at || null
+      lat: Number(lat),
+      lng: Number(lng),
+      address: user.last_address ?? user.initial_address ?? null,
+      updated_at: user.last_seen_at ?? user.initial_loc_at ?? null,
     });
   } catch (err) {
     console.error('GET /users/me/location failed', err);
@@ -33,66 +75,65 @@ router.get('/users/me/location', requireAuth, async (req: any, res) => {
 
 /**
  * POST /api/users/me/location
- * Updates operator location with lat, lng, and full address
+ * Updates operator location in appdb.users with { lat, lng, address? }
  */
 router.post('/users/me/location', requireAuth, async (req: any, res) => {
   try {
     const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'unauthorized' });
-
-    const { lat, lng, address } = req.body;
-    
-    if (!lat || !lng) {
-      return res.status(400).json({ error: 'lat and lng are required' });
+    if (!userId || !ObjectId.isValid(userId)) {
+      return res.status(401).json({ error: 'unauthorized' });
     }
+
+    const { lat, lng, address } = req.body || {};
 
     const latNum = Number(lat);
     const lngNum = Number(lng);
-    
+
     if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
-      return res.status(400).json({ error: 'Invalid lat/lng values' });
+      return res.status(400).json({ error: 'lat and lng are required numbers' });
     }
 
     const updatedAt = new Date();
 
-    // Geocode coordinates to get real address if not provided
-    let realAddress = address;
-    if (!address) {
+    // Optionally reverse geocode if address missing (best-effort)
+    let resolvedAddress: string | null = address || null;
+    if (!resolvedAddress) {
       try {
         const { reverseGeocode } = await import('./geo');
-        const geocodedAddress = await reverseGeocode(latNum, lngNum);
-        if (geocodedAddress) {
-          realAddress = geocodedAddress;
-        }
-      } catch (e) {
-        console.log('Reverse geocoding failed:', e);
+        const out = await reverseGeocode(latNum, lngNum);
+        if (out) resolvedAddress = out;
+      } catch {
+        // swallow; address stays null
       }
     }
 
-    // Update operators collection in customer DB
-    const db = getCustomerDb();
-    await db.collection('operators').updateOne(
-      { user_id: String(userId) },
+    // Write to appdb.users
+    const db = getAuthDb();
+    const users = db.collection('users');
+
+    await users.updateOne(
+      { _id: new ObjectId(userId) },
       {
         $set: {
-          user_id: String(userId),
           last_lat: latNum,
           last_lng: lngNum,
-          last_address: realAddress || null,
+          last_address: resolvedAddress ?? null,
           last_seen_at: updatedAt,
-          accuracy_m: 50,
-          source: 'device',
+        },
+        $setOnInsert: {
+          // ensure document has the base shape even if created here
+          created_at: new Date(),
         },
       },
       { upsert: true }
     );
 
-    res.json({ 
-      success: true, 
-      lat: latNum, 
-      lng: lngNum, 
-      address: realAddress || null,
-      updated_at: updatedAt 
+    return res.json({
+      success: true,
+      lat: latNum,
+      lng: lngNum,
+      address: resolvedAddress ?? null,
+      updated_at: updatedAt,
     });
   } catch (err) {
     console.error('POST /users/me/location failed', err);
@@ -101,48 +142,41 @@ router.post('/users/me/location', requireAuth, async (req: any, res) => {
 });
 
 /**
- * Utility endpoint to update existing operators with addresses
+ * (Optional maintenance)
+ * POST /api/operator/update-initial-from-last
+ * If a user has only initial_* fields missing but has last_*, copy them over once.
  */
-router.post('/update-addresses', requireAuth, async (req: any, res) => {
+router.post('/operator/update-initial-from-last', requireAuth, async (_req: any, res) => {
   try {
-    const db = getCustomerDb();
-    const operators = await db.collection('operators').find({
-      $or: [
-        { last_address: null },
-        { last_address: { $exists: false } }
-      ],
-      last_lat: { $exists: true, $ne: null },
-      last_lng: { $exists: true, $ne: null }
-    }).toArray();
+    const db = getAuthDb();
+    const users = db.collection('users');
+
+    const cur = users.find({
+      last_lat: { $exists: true },
+      last_lng: { $exists: true },
+      $or: [{ initial_lat: { $exists: false } }, { initial_lng: { $exists: false } }],
+    });
 
     let updated = 0;
-    
-    for (const operator of operators) {
-      try {
-        const { reverseGeocode } = await import('./geo');
-        const address = await reverseGeocode(operator.last_lat, operator.last_lng);
-        
-        if (address) {
-          await db.collection('operators').updateOne(
-            { _id: operator._id },
-            { $set: { last_address: address } }
-          );
-          updated++;
+    for await (const u of cur) {
+      await users.updateOne(
+        { _id: u._id },
+        {
+          $set: {
+            initial_lat: u.initial_lat ?? u.last_lat,
+            initial_lng: u.initial_lng ?? u.last_lng ?? u.last_long,
+            initial_address: u.initial_address ?? u.last_address ?? null,
+            initial_loc_at: u.initial_loc_at ?? u.last_seen_at ?? new Date(),
+          },
         }
-      } catch (e) {
-        console.log(`Failed to geocode operator ${operator._id}:`, e);
-      }
+      );
+      updated++;
     }
 
-    res.json({ 
-      success: true, 
-      total: operators.length, 
-      updated,
-      message: `Updated ${updated} out of ${operators.length} operators with addresses`
-    });
+    return res.json({ success: true, updated });
   } catch (err) {
-    console.error('POST /update-addresses failed', err);
-    return res.status(500).json({ error: 'failed to update addresses' });
+    console.error('POST /operator/update-initial-from-last failed', err);
+    return res.status(500).json({ error: 'failed to update initial fields' });
   }
 });
 
