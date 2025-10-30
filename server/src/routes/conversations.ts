@@ -188,6 +188,7 @@ r.get('/', requireAuth as any, async (req: any, res) => {
         requestId: c.requestId ? String(c.requestId) : null,
         lastMessage: c.lastMessage ?? null,
         lastMessageAt: c.lastMessageAt ?? null,
+        participants: Array.isArray(c.members) ? c.members.map((m: any) => String(m)) : [],
         unread,
       };
     })
@@ -225,7 +226,7 @@ r.get('/:id', requireAuth as any, async (req: any, res) => {
   res.json({
     id: String(conv._id),
     requestId: conv.requestId ? String(conv.requestId) : null,
-    members,
+    participants: members,
     title: title || 'Conversation',
     peer,
     lastMessage: (conv as any)?.lastMessage ?? null,

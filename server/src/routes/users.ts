@@ -1,230 +1,184 @@
 import { Router } from 'express';
-import { ObjectId, type Document, type UpdateFilter } from 'mongodb';
-import { getAuthDb } from '../db/connect';
-import { requireAuth } from '../middleware/jwt';
+import { Types } from 'mongoose';
+import { getCustomerDb } from '../db/connect';
+import { requireAuth } from '../middleware/requireAuth';
 
 const router = Router();
 
-/**
- * GET /api/users/me
- */
-router.get('/me', requireAuth, async (req, res, next) => {
+/** Normalize/whitelist outgoing user fields. Returns both snake_case and camelCase so the client never misses. */
+function toPublicUser(u: any) {
+  if (!u) return null;
+
+  // prefer explicit initial_* fields; fall back to nested location.*
+  const initial_lat =
+    u.initial_lat ?? u.initialLat ?? u.location?.initial_lat ?? u.location?.initialLat ?? u.lat ?? u.location?.lat ?? null;
+
+  const initial_long =
+    u.initial_long ??
+    u.initialLong ??
+    u.initial_lng ??
+    u.initialLng ??
+    u.location?.initial_long ??
+    u.location?.initialLong ??
+    u.location?.initial_lng ??
+    u.location?.initialLng ??
+    u.lng ??
+    u.location?.lng ??
+    null;
+
+  const initial_address =
+    u.initial_address ??
+    u.initialAddress ??
+    u.location?.initial_address ??
+    u.location?.initialAddress ??
+    u.address ??
+    u.location?.address ??
+    null;
+
+  const base = {
+    _id: String(u._id ?? u.id ?? ''),
+    name: u.name ?? null,
+    email: u.email ?? null,
+    phone: u.phone ?? null,
+    avatar: u.avatar ?? null,
+
+    // canonical (snake_case)
+    initial_lat,
+    initial_long,
+    initial_address,
+
+    // mirrors (camelCase)
+    initialLat: initial_lat,
+    initialLong: initial_long,
+    initialAddress: initial_address,
+
+    // last known current coords if you keep them
+    lat: u.lat ?? u.location?.lat ?? null,
+    lng: u.lng ?? u.location?.lng ?? null,
+    address: u.address ?? u.location?.address ?? null,
+
+    updated_at: u.updated_at ?? u.updatedAt ?? u.location?.updated_at ?? u.location?.updatedAt ?? null,
+  };
+
+  return base;
+}
+
+async function findUserDocById(userId: string) {
+  const db = await getCustomerDb();
+  const coll = db.collection('users');
+
+  // Support ObjectId or string id
+  const filter = Types.ObjectId.isValid(userId)
+    ? { _id: new Types.ObjectId(userId) }
+    : { _id: userId };
+
+  return coll.findOne(filter);
+}
+
+/** GET /api/users/me – return my profile with initial_* */
+router.get('/me', requireAuth, async (req: any, res) => {
   try {
-    const { id } = (req as any).user as { id: string };
-    if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid user id' });
+    const meId = String(req.user?.id ?? req.user?._id ?? '');
+    if (!meId) return res.status(401).json({ message: 'Unauthorized' });
 
-    const db = getAuthDb();
-    const users = db.collection('users');
+    const doc = await findUserDocById(meId);
+    if (!doc) return res.status(404).json({ message: 'User not found' });
 
-    const user = await users.findOne(
-      { _id: new ObjectId(id) },
-      { projection: { username: 1, phone: 1, email: 1 } }
-    );
-
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    res.json({
-      username: user.username ?? '',
-      phone: user.phone ?? '',
-      email: user.email ?? '',
-    });
-  } catch (e) {
-    next(e);
+    return res.json(toPublicUser(doc));
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message ?? 'Failed to load profile' });
   }
 });
 
-/**
- * GET /api/users/me/location
- */
-router.get('/me/location', requireAuth, async (req, res, next) => {
+/** GET /api/users/:id – return a user's public profile with initial_* */
+router.get('/:id', requireAuth, async (req: any, res) => {
   try {
-    const { id } = (req as any).user as { id: string };
-    if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid user id' });
+    const id = String(req.params.id);
+    const doc = await findUserDocById(id);
+    if (!doc) return res.status(404).json({ message: 'User not found' });
 
-    // Read operator location from the app DB (appdb)
-    const db = getAuthDb();
-    const users = db.collection('users');
-
-    const user = await users.findOne(
-      { _id: new ObjectId(id) },
-      {
-        projection: {
-          initial_lat: 1,
-          initial_lng: 1,
-          // tolerate alternate spellings/keys
-          initial_long: 1,
-          inital_lat: 1,
-          inital_long: 1,
-          initial_address: 1,
-          initial_loc_at: 1,
-          last_lat: 1,
-          last_lng: 1,
-          last_long: 1,
-          last_address: 1,
-          last_seen_at: 1,
-        },
-      }
-    );
-
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    // prefer last_* then fall back to initial_*, accepting common alternate keys
-    const lat =
-      user.last_lat ??
-      user.initial_lat ??
-      user.inital_lat ?? // tolerate typo
-      null;
-
-    const lng =
-      user.last_lng ??
-      user.last_long ??
-      user.initial_lng ??
-      user.initial_long ??
-      user.inital_long ?? // tolerate typo
-      null;
-    const address = user.last_address ?? user.initial_address;
-    const updated_at = user.last_seen_at ?? user.initial_loc_at;
-
-    if (lat == null || lng == null) return res.status(404).json({ message: 'Location not found' });
-
-    res.json({
-      lat: Number(lat),
-      lng: Number(lng),
-      address: address ?? null,
-      updated_at: updated_at ?? null,
-    });
-  } catch (e) {
-    next(e);
+    return res.json(toPublicUser(doc));
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message ?? 'Failed to load user' });
   }
 });
 
-/**
- * POST /api/users/me/location
- * Body: { lat: number, lng: number, address?: string }
- * Updates operator's last_* fields in appdb.users so client maps can read it.
- */
-router.post('/me/location', requireAuth, async (req, res, next) => {
+/** GET /api/users/me/location – normalized lat/lng/address (prefers initial_* if present) */
+router.get('/me/location', requireAuth, async (req: any, res) => {
   try {
-    const { id } = (req as any).user as { id: string };
-    if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid user id' });
+    const meId = String(req.user?.id ?? req.user?._id ?? '');
+    if (!meId) return res.status(401).json({ message: 'Unauthorized' });
 
-    const latNum = Number(req.body?.lat);
-    const lngNum = Number(req.body?.lng);
-    const address = req.body?.address ? String(req.body.address) : null;
+    const doc = await findUserDocById(meId);
+    if (!doc) return res.status(404).json({ message: 'User not found' });
 
-    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
-      return res.status(400).json({ message: 'Invalid lat/lng' });
-    }
+    const u = toPublicUser(doc);
+    return res.json({
+      lat: (u.initial_lat ?? u.lat) ?? null,
+      lng: (u.initial_long ?? u.lng) ?? null,
+      address: (u.initial_address ?? u.address) ?? null,
 
-    const db = getAuthDb(); // appdb
-    const users = db.collection('users');
+      // include both spellings (helps older clients)
+      initial_lat: u.initial_lat ?? null,
+      initial_long: u.initial_long ?? null,
+      initial_address: u.initial_address ?? null,
+      updated_at: u.updated_at ?? null,
+    });
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message ?? 'Failed to load location' });
+  }
+});
 
-    const updatedAt = new Date();
+/** POST /api/users/me/location – update my current/initial location */
+router.post('/me/location', requireAuth, async (req: any, res) => {
+  try {
+    const meId = String(req.user?.id ?? req.user?._id ?? '');
+    if (!meId) return res.status(401).json({ message: 'Unauthorized' });
 
-    // Read existing initial_* to avoid overwriting if already set
-    const existing = await users.findOne(
-      { _id: new ObjectId(id) },
-      { projection: { initial_lat: 1, initial_lng: 1, initial_long: 1, initial_address: 1, initial_loc_at: 1 } }
-    );
+    // incoming from device
+    const lat = Number(req.body?.lat);
+    const lng = Number(req.body?.lng);
+    const address =
+      req.body?.address ??
+      req.body?.initial_address ??
+      req.body?.initialAddress ??
+      null;
 
-    const hasInitialLat = existing && (existing as any).initial_lat != null;
-    const hasInitialLng = existing && ((existing as any).initial_lng != null || (existing as any).initial_long != null);
+    const db = await getCustomerDb();
+    const coll = db.collection('users');
 
-    const setDoc: Record<string, any> = {
-      // Always keep last_* updated for live location
-      last_lat: latNum,
-      last_lng: lngNum,
-      last_long: lngNum,
-      last_address: address,
-      last_seen_at: updatedAt,
+    const filter = Types.ObjectId.isValid(meId)
+      ? { _id: new Types.ObjectId(meId) }
+      : { _id: meId };
+
+    // Read current doc to only set initial_* once
+    const existing = await coll.findOne(filter);
+
+    const $set: any = {
+      'location.updated_at': new Date(),
     };
+    if (Number.isFinite(lat)) $set['location.lat'] = lat;
+    if (Number.isFinite(lng)) $set['location.lng'] = lng;
+    if (typeof address === 'string') $set['location.address'] = address;
 
-    // Backfill initial_* once if missing so clients using initial_* work
-    if (!hasInitialLat) setDoc.initial_lat = latNum;
-    if (!hasInitialLng) {
-      setDoc.initial_lng = lngNum;
-      setDoc.initial_long = lngNum; // compatibility with schemas using "long"
-    }
-    if (existing && (existing as any).initial_address == null && address != null) {
-      setDoc.initial_address = address;
-    }
-    if (existing && (existing as any).initial_loc_at == null) {
-      setDoc.initial_loc_at = updatedAt;
-    }
-
-    await users.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: setDoc },
-      { upsert: true }
-    );
-
-    res.json({ ok: true, lat: latNum, lng: lngNum, address, updated_at: updatedAt });
-  } catch (e) {
-    next(e);
-  }
-});
-
-/**
- * POST /api/users/me/push-token
- * Body: { token: string }
- * Saves Expo push token (addToSet -> allows multiple devices)
- */
-router.post('/me/push-token', requireAuth, async (req, res, next) => {
-  try {
-    const { id } = (req as any).user as { id: string };
-    const token = String(req.body?.token || '').trim();
-
-    if (!token) return res.status(400).json({ message: 'Missing token' });
-    if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid user id' });
-
-    const db = getAuthDb();
-    const users = db.collection('users');
-
-    await users.updateOne(
-      { _id: new ObjectId(id) },
-      {
-        $addToSet: { expoPushTokens: token },
-        $set: { last_seen_at: new Date() },
-      }
-    );
-
-    res.json({ ok: true });
-  } catch (e) {
-    next(e);
-  }
-});
-
-/**
- * DELETE /api/users/me/push-token
- * Body: { token: string }  (optional – removes one; if omitted, clears all)
- */
-router.delete('/me/push-token', requireAuth, async (req, res, next) => {
-  try {
-    const { id } = (req as any).user as { id: string };
-    if (!ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid user id' });
-
-    const token = req.body?.token ? String(req.body.token) : null;
-
-    const db = getAuthDb();
-    const users = db.collection('users');
-
-    if (token) {
-      const update: UpdateFilter<Document> = { $pull: { expoPushTokens: token } } as any;
-      await users.updateOne(
-        { _id: new ObjectId(id) },
-        update
-      );
+    // Only set initial_* if missing
+    if (!existing) {
+      if (Number.isFinite(lat)) $set.initial_lat = lat;
+      if (Number.isFinite(lng)) $set.initial_long = lng;
+      if (typeof address === 'string' && address.trim()) $set.initial_address = address.trim();
     } else {
-      const update: UpdateFilter<Document> = { $set: { expoPushTokens: [] } } as any;
-      await users.updateOne(
-        { _id: new ObjectId(id) },
-        update
-      );
+      if (existing.initial_lat == null && Number.isFinite(lat)) $set.initial_lat = lat;
+      if (existing.initial_long == null && Number.isFinite(lng)) $set.initial_long = lng;
+      if (existing.initial_address == null && typeof address === 'string' && address.trim()) {
+        $set.initial_address = address.trim();
+      }
     }
 
-    res.json({ ok: true });
-  } catch (e) {
-    next(e);
+    await coll.updateOne(filter, { $set }, { upsert: true });
+    const fresh = await coll.findOne(filter);
+    return res.json(toPublicUser(fresh));
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message ?? 'Failed to update location' });
   }
 });
 

@@ -6,10 +6,10 @@ import { config } from './config';
 import assistRoutes from './routes/assist';
 import authRoutes from './routes/auth';
 import geoRoutes from './routes/geo';
-import operatorRoutes from './routes/operator';
-import usersRoutes from './routes/users';
+import operatorRoutes from './routes/operator';          // <- unified users/operator router
+// import usersRoutes from './routes/users';              // <- not needed when operatorRoutes is used for users
 import messagesRoutes from './routes/messages';          // optional/legacy
-import conversationsRoutes from './routes/conversations'; // 👈 used by client
+import conversationsRoutes from './routes/conversations'; // used by client
 
 const app = express();
 
@@ -40,15 +40,18 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 /* ---------- routes ---------- */
 app.use('/api/auth', authRoutes);
-app.use('/api/users', usersRoutes);
+
+// Use the same router for both paths so the client can call either:
+// /api/users/me, /api/users/me/location, /api/users/:id
+// /api/operator/me, /api/operator/me/location, /api/operator/update-initial-from-last
+app.use('/api/users', operatorRoutes);
+app.use('/api/operator', operatorRoutes);
+
 app.use('/api/assist', assistRoutes);
 app.use('/api/geo', geoRoutes); // Map/routing proxy (OSRM) used by client helpers
 
 // Conversations API (this is what your client calls)
 app.use('/api/conversations', conversationsRoutes);
-
-// Other operator routes (mounted under /api)
-app.use('/api', operatorRoutes);
 
 // Optional/legacy in-memory messages (not used by current client)
 app.use('/api/messages', messagesRoutes);
