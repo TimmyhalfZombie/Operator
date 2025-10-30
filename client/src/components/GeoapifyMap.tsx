@@ -2,17 +2,21 @@
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import React from 'react';
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { GEOAPIFY_KEY } from '../constants/geo';
 import { http } from '../lib/http';
+import { getRouteORS, toFeatureCollection } from '../lib/routing';
 import UserPin from './ClientPin';
 import OperatorPin from './OperatorPin';
 
 type Props = {
+  /** Client/customer latitude (blue dot) */
   lat?: number | null;
+  /** Client/customer longitude (blue dot) */
   lng?: number | null;
   zoom?: number;
   style?: StyleProp<ViewStyle>;
+  /** Show operator pin and route only once accepted */
   showOperator?: boolean;
+  /** Skip auto-zoom if true */
   disableAutoZoom?: boolean;
 };
 
@@ -27,31 +31,9 @@ MapLibreGL.setAccessToken(null);
 // Fetch the operator (current user) location (server returns from appdb.users)
 async function fetchOperatorLocation(): Promise<OperatorLocation | null> {
   try {
-    // http.get returns parsed JSON directly (see http.ts)
-    const data = await http.get('/users/me/location', { auth: true });
+    const data = await http.get('/api/users/me/location', { auth: true });
     if (!isNum((data as any)?.lat) || !isNum((data as any)?.lng)) return null;
     return { lat: (data as any).lat, lng: (data as any).lng, updated_at: (data as any).updated_at };
-  } catch {
-    return null;
-  }
-}
-
-/** Fetch a driving route (Geoapify) between two points, returns a GeoJSON FeatureCollection */
-async function fetchDriveRoute(
-  fromLng: number,
-  fromLat: number,
-  toLng: number,
-  toLat: number,
-  apiKey: string
-): Promise<any | null> {
-  if (!apiKey) return null;
-  try {
-    const url = `https://api.geoapify.com/v1/routing?waypoints=${fromLng},${fromLat}|${toLng},${toLat}&mode=drive&apiKey=${apiKey}`;
-    const r = await fetch(url);
-    if (!r.ok) return null;
-    const j = await r.json();
-    const feat = j?.features?.[0];
-    return feat ? { type: 'FeatureCollection', features: [feat] } : null;
   } catch {
     return null;
   }
@@ -83,7 +65,7 @@ export default function GeoapifyMap({
     if (byUser) userHasTakenControl.current = true;
   }, []);
 
-  // Poll operator location
+  // Poll operator location only when we should show the operator (i.e., after Accept)
   React.useEffect(() => {
     if (!showOperator) {
       setOp(null);
@@ -103,7 +85,7 @@ export default function GeoapifyMap({
     };
   }, [showOperator]);
 
-  // Route overlay when both ends exist
+  // Route overlay when both ends exist (operator -> client blue dot)
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -111,8 +93,15 @@ export default function GeoapifyMap({
         if (!cancelled) setRouteFC(null);
         return;
       }
-      const fc = await fetchDriveRoute(op.lng, op.lat, clientCenter[0], clientCenter[1], GEOAPIFY_KEY);
-      if (!cancelled) setRouteFC(fc);
+      // ORS expects [lng,lat]
+      const route = await getRouteORS(
+        [
+          [op.lng, op.lat],
+          [clientCenter[0], clientCenter[1]],
+        ],
+        'driving-car'
+      );
+      if (!cancelled) setRouteFC(toFeatureCollection(route));
     })();
     return () => {
       cancelled = true;
@@ -196,15 +185,17 @@ export default function GeoapifyMap({
           <MapLibreGL.ShapeSource id="route" shape={routeFC}>
             <MapLibreGL.LineLayer
               id="route-line"
-              style={{ lineColor: '#6EFF87', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.95 }}
+              style={{ lineColor: '#00B3FF', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.95 }}
             />
           </MapLibreGL.ShapeSource>
         )}
 
+        {/* Client = blue dot location */}
         <MapLibreGL.MarkerView id="client-pin" coordinate={clientCenter} anchor={{ x: 0.5, y: 1.0 }}>
           <UserPin />
         </MapLibreGL.MarkerView>
 
+        {/* Operator = your app device location */}
         {showOperator && op && isNum(op.lat) && isNum(op.lng) && (
           <MapLibreGL.MarkerView id="operator-pin" coordinate={[op.lng, op.lat]} anchor={{ x: 0.5, y: 0.5 }}>
             <OperatorPin />

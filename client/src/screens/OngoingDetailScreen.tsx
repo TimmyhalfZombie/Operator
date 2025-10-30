@@ -117,6 +117,7 @@ export default function OngoingDetailScreen() {
         lat={doc?.coords?.lat || doc?.location?.coordinates?.[1] || null}
         lng={doc?.coords?.lng || doc?.location?.coordinates?.[0] || null}
         showOperator={true}
+        autoUseDeviceLocation={true}
         style={styles.mapContainer}
       />
 

@@ -24,4 +24,7 @@ export const config = {
   appName: process.env.APP_NAME || 'Server',
   jwtSecret: must('JWT_SECRET'),
   clientUrl: process.env.CLIENT_URL || 'http://localhost:19006',
+
+  // 👇 NEW: ORS routing
+  orsApiKey: must('ORS_API_KEY'),
 };
