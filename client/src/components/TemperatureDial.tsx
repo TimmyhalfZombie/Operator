@@ -1,9 +1,13 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, G, Line, Polygon } from 'react-native-svg';
+import Svg, { Circle, G, Line, Path } from 'react-native-svg';
 
 type Props = {
   size?: number;       // overall diameter
+  value?: number;      // numeric temperature reading
+  minValue?: number;
+  maxValue?: number;
+  targetValue?: number; // show desired temperature tick (optional)
   valueText?: string;  // center text; e.g. "27°C"
   isHeating?: boolean;
   isCooling?: boolean;
@@ -11,9 +15,29 @@ type Props = {
   timerText?: string;  // optional mm:ss below value
 };
 
+function clamp(v: number, min: number, max: number) {
+  if (Number.isNaN(v)) return min;
+  if (v < min) return min;
+  if (v > max) return max;
+  return v;
+}
+
+function toRadians(deg: number) {
+  return (Math.PI / 180) * deg;
+}
+
+function polarToCartesian(cx: number, cy: number, r: number, deg: number) {
+  const rad = toRadians(deg);
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
 export default function TemperatureDial({
   size = 240,
-  valueText = '0°C',
+  value,
+  minValue = 0,
+  maxValue = 120,
+  targetValue,
+  valueText,
   isHeating = false,
   isCooling = false,
   isRetracting = false,
@@ -22,26 +46,101 @@ export default function TemperatureDial({
   const cx = size / 2;
   const cy = size / 2;
 
-  const outerStroke = 20;
-  const innerStroke = 12;
-  const ticksRadius = cx - outerStroke * 1.15;
-  const knobRadius = 18;
-
-  const tickCount = 60;
-  const tickLength = 8;
+  const outerStroke = 24;
   const tickStroke = 2;
+  const tickLength = 6;
+  const tickCount = 60;
 
-  const pt = (r: number, deg: number) => {
-    const rad = (Math.PI / 180) * deg;
-    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-    };
+  const baseMin = Number.isFinite(minValue) ? minValue : 0;
+  const baseMax = Number.isFinite(maxValue) && maxValue !== minValue ? maxValue : baseMin + 1;
+  const rawValue = value != null ? value : baseMin;
+  const clampedValue = clamp(rawValue, baseMin, baseMax);
+  const progress = clamp((clampedValue - baseMin) / (baseMax - baseMin), 0, 1);
+  const startAngle = 90; // bottom
+  const sweepDeg = progress * 360;
+  const endAngle = startAngle + sweepDeg;
+
+  const displayText = valueText ?? `${Math.round(clampedValue)}°C`;
+
+  const progressColor = isRetracting
+    ? '#FF4D4D'
+    : isCooling
+      ? '#4EA7FF'
+      : isHeating
+        ? '#FF7A00'
+        : '#44FF75';
+
+  const trackRadius = cx - outerStroke / 2;
+  const ticksRadius = trackRadius - outerStroke * 0.35;
+
+  const knobRadius = 12;
+  const knobPos = polarToCartesian(cx, cy, trackRadius, endAngle);
+
+  const targetMarker = (() => {
+    if (targetValue == null) return null;
+    const tv = clamp(targetValue, baseMin, baseMax);
+    const tProgress = (tv - baseMin) / (baseMax - baseMin);
+    const tAngle = startAngle + tProgress * 360;
+    const outer = polarToCartesian(cx, cy, trackRadius + outerStroke * 0.05, tAngle);
+    const inner = polarToCartesian(cx, cy, trackRadius - outerStroke * 0.55, tAngle);
+    return (
+      <Line
+        x1={inner.x}
+        y1={inner.y}
+        x2={outer.x}
+        y2={outer.y}
+        stroke="#FFFFFF"
+        strokeWidth={3}
+        strokeLinecap="round"
+        opacity={0.6}
+      />
+    );
+  })();
+
+  const pt = (r: number, deg: number) => polarToCartesian(cx, cy, r, deg);
 
   return (
     <View style={{ alignItems: 'center' }}>
       <View style={{ width: size, height: size }}>
         <Svg width={size} height={size}>
-          <Circle cx={cx} cy={cy} r={cx - outerStroke / 2} stroke="#2a2a2a" strokeWidth={outerStroke} fill="none" />
-          <Circle cx={cx} cy={cy} r={cx - outerStroke - innerStroke / 2 + 2} stroke="#1f1f1f" strokeWidth={innerStroke} fill="none" />
+          {/* Track */}
+          <Circle
+            cx={cx}
+            cy={cy}
+            r={trackRadius}
+            stroke="#1F1F1F"
+            strokeWidth={outerStroke}
+            fill="none"
+          />
+
+          {/* Progress */}
+          {progress > 0 && progress >= 0.999 ? (
+            <Circle
+              cx={cx}
+              cy={cy}
+              r={trackRadius}
+              stroke={progressColor}
+              strokeWidth={outerStroke}
+              fill="none"
+            />
+          ) : null}
+          {progress > 0 && progress < 0.999 ? (() => {
+            const largeArc = sweepDeg > 180 ? 1 : 0;
+            const arcStart = polarToCartesian(cx, cy, trackRadius, startAngle);
+            const arcEnd = polarToCartesian(cx, cy, trackRadius, endAngle);
+            const d = `M ${arcStart.x} ${arcStart.y} A ${trackRadius} ${trackRadius} 0 ${largeArc} 1 ${arcEnd.x} ${arcEnd.y}`;
+            return (
+              <Path
+                d={d}
+                stroke={progressColor}
+                strokeWidth={outerStroke}
+                strokeLinecap="round"
+                fill="none"
+              />
+            );
+          })() : null}
+
+          {/* Degree ticks */}
           <G>
             {Array.from({ length: tickCount }).map((_, i) => {
               const deg = (360 / tickCount) * i - 90;
@@ -63,26 +162,23 @@ export default function TemperatureDial({
             })}
           </G>
 
-          {/* Bottom marker */}
-          {(() => {
-            const base = pt(ticksRadius - tickLength - 6, 90);
-            const left = pt(ticksRadius - tickLength - 2, 90 + 6);
-            const right = pt(ticksRadius - tickLength - 2, 90 - 6);
-            const points = `${base.x},${base.y} ${left.x},${left.y} ${right.x},${right.y}`;
-            return <Polygon points={points} fill="#ffffff" />;
-          })()}
+          {targetMarker}
+
+          {/* Knob */}
+          <Circle
+            cx={knobPos.x}
+            cy={knobPos.y}
+            r={knobRadius}
+            fill="#FFFFFF"
+            stroke={progressColor}
+            strokeWidth={4}
+          />
         </Svg>
 
         {/* Center value text — ALWAYS show real reading */}
         <View style={styles.centerWrap} pointerEvents="none">
-          <Text style={styles.valueText}>{valueText}</Text>
+          <Text style={styles.valueText}>{displayText}</Text>
           {timerText ? <Text style={styles.timerText}>{timerText}</Text> : null}
-        </View>
-
-        {/* Green knob */}
-        <View style={[styles.knobContainer, { left: cx - knobRadius, top: size - knobRadius * 2 - 6 }]}>
-          <View style={styles.triangularPointer} />
-          <View style={styles.knob} />
         </View>
       </View>
     </View>
@@ -107,21 +203,5 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginTop: 6,
     fontFamily: 'Inter-Regular',
-  },
-  knobContainer: { position: 'absolute' },
-  triangularPointer: {
-    position: 'absolute',
-    top: -8,
-    left: 14,
-    width: 0, height: 0,
-    borderLeftWidth: 4, borderRightWidth: 4, borderBottomWidth: 8,
-    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#ffffff',
-  },
-  knob: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#50ff84',
-    borderWidth: 3, borderColor: '#1b1b1b',
-    elevation: 6,
-    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
   },
 });

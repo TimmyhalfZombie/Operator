@@ -36,13 +36,13 @@ export default function OperateScreen() {
     setLabelPhase(phase);
   }, [phase]);
 
-  // Set countdown deadline per phase: heating=10min, coolingdown=2min
+  // Set countdown deadline per phase: heating=15min, coolingdown=15min
   useEffect(() => {
     const now = Date.now();
     if (phase === 'heating') {
-      setPhaseDeadlineAt(now + 10 * 60 * 1000);
+      setPhaseDeadlineAt(now + 15 * 60 * 1000);
     } else if (phase === 'coolingdown') {
-      setPhaseDeadlineAt(now + 2 * 60 * 1000);
+      setPhaseDeadlineAt(now + 15 * 60 * 1000);
     } else {
       setPhaseDeadlineAt(null);
     }
@@ -139,7 +139,9 @@ export default function OperateScreen() {
       {/* Dial */}
       <View style={{ marginTop: 90, justifyContent: 'center', alignItems: 'center' }}>
         <TemperatureDial
-          valueText={`${Math.round(tempC)}°C`}   // pass live reading
+          value={tempC}
+          minValue={0}
+          maxValue={120}
           isHeating={phase === 'heating'}
           isCooling={phase === 'coolingdown'}
           isRetracting={phase === 'retracting'}
