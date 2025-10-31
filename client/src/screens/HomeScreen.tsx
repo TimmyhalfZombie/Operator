@@ -79,7 +79,7 @@ export default function HomeScreen() {
 
       {/* Temperature Dial */}
       <View style={{ marginTop: 40 }}>
-        <TemperatureDial value={22} minValue={0} maxValue={120} />
+        <TemperatureDial value={connectedDeviceId ? undefined : 0} minValue={0} maxValue={120} />
       </View>
 
       {/* BLE Section */}
