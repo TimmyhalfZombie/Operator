@@ -8,44 +8,59 @@ const router = Router();
 /** Normalize outgoing user fields (returns both snake_case and camelCase) */
 function toPublicUser(u: any) {
   if (!u) return null;
+  const userObj = u as Record<string, any>;
 
   const initial_lat =
-    u.initial_lat ??
-    u.initialLat ??
-    u.location?.initial_lat ??
-    u.location?.initialLat ??
-    u.lat ??
-    u.location?.lat ??
+    userObj.initial_lat ??
+    userObj.initialLat ??
+    userObj.location?.initial_lat ??
+    userObj.location?.initialLat ??
+    userObj.lat ??
+    userObj.location?.lat ??
     null;
 
   const initial_long =
-    u.initial_long ??
-    u.initialLong ??
-    u.initial_lng ??
-    u.initialLng ??
-    u.location?.initial_long ??
-    u.location?.initialLong ??
-    u.location?.initial_lng ??
-    u.location?.initialLng ??
-    u.lng ??
-    u.location?.lng ??
+    userObj.initial_long ??
+    userObj.initialLong ??
+    userObj.initial_lng ??
+    userObj.initialLng ??
+    userObj.location?.initial_long ??
+    userObj.location?.initialLong ??
+    userObj.location?.initial_lng ??
+    userObj.location?.initialLng ??
+    userObj.lng ??
+    userObj.location?.lng ??
     null;
 
   const initial_address =
-    u.initial_address ??
-    u.initialAddress ??
-    u.location?.initial_address ??
-    u.location?.initialAddress ??
-    u.address ??
-    u.location?.address ??
+    userObj.initial_address ??
+    userObj.initialAddress ??
+    userObj.location?.initial_address ??
+    userObj.location?.initialAddress ??
+    userObj.address ??
+    userObj.location?.address ??
     null;
 
+  const composedName = [userObj.firstName, userObj.lastName].filter(Boolean).join(' ').trim() || null;
+  const name = userObj.name ?? composedName ?? null;
+  const phone =
+    userObj.phone ??
+    userObj.phoneNumber ??
+    userObj.customerPhone ??
+    userObj.contactPhone ??
+    userObj.mobile ??
+    userObj.tel ??
+    null;
+  const email = userObj.email ?? userObj.contactEmail ?? userObj.username ?? null;
+  const username = userObj.username ?? name ?? email ?? null;
+
   return {
-    _id: String(u._id ?? u.id ?? ''),
-    name: u.name ?? null,
-    email: u.email ?? null,
-    phone: u.phone ?? null,
-    avatar: u.avatar ?? null,
+    _id: String(userObj._id ?? userObj.id ?? ''),
+    name,
+    username,
+    email,
+    phone,
+    avatar: userObj.avatar ?? null,
 
     // canonical snake_case
     initial_lat,
@@ -58,17 +73,17 @@ function toPublicUser(u: any) {
     initialAddress: initial_address,
 
     // latest (if you store them)
-    lat: u.lat ?? u.location?.lat ?? u.last_lat ?? null,
-    lng: u.lng ?? u.location?.lng ?? u.last_lng ?? u.last_long ?? null,
-    address: u.address ?? u.location?.address ?? u.last_address ?? null,
+    lat: userObj.lat ?? userObj.location?.lat ?? userObj.last_lat ?? null,
+    lng: userObj.lng ?? userObj.location?.lng ?? userObj.last_lng ?? userObj.last_long ?? null,
+    address: userObj.address ?? userObj.location?.address ?? userObj.last_address ?? null,
 
     updated_at:
-      u.updated_at ??
-      u.updatedAt ??
-      u.location?.updated_at ??
-      u.location?.updatedAt ??
-      u.last_seen_at ??
-      u.initial_loc_at ??
+      userObj.updated_at ??
+      userObj.updatedAt ??
+      userObj.location?.updated_at ??
+      userObj.location?.updatedAt ??
+      userObj.last_seen_at ??
+      userObj.initial_loc_at ??
       null,
   };
 }
@@ -78,7 +93,7 @@ async function usersColl() {
   return db.collection('users');
 }
 
-function idFilter(id: string) {
+function idFilter(id: string): Record<string, any> {
   return ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
 }
 
@@ -92,7 +107,7 @@ router.get('/me', requireAuth, async (req: any, res) => {
     if (!uid) return res.status(401).json({ message: 'unauthorized' });
 
     const coll = await usersColl();
-    const doc = await coll.findOne(idFilter(uid));
+    const doc = await coll.findOne(idFilter(uid) as any);
     if (!doc) return res.status(404).json({ message: 'User not found' });
 
     return res.json(toPublicUser(doc));
@@ -108,7 +123,7 @@ router.get('/:id', requireAuth, async (req: any, res) => {
   try {
     const id = String(req.params.id);
     const coll = await usersColl();
-    const doc = await coll.findOne(idFilter(id));
+    const doc = await coll.findOne(idFilter(id) as any);
     if (!doc) return res.status(404).json({ message: 'User not found' });
 
     return res.json(toPublicUser(doc));
@@ -129,7 +144,7 @@ router.get('/me/location', requireAuth, async (req: any, res) => {
 
     const coll = await usersColl();
     const user = await coll.findOne(
-      idFilter(uid),
+      idFilter(uid) as any,
       {
         projection: {
           last_lat: 1,

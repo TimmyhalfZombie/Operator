@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const BG = 'rgba(14, 14, 14, 14)';
+const BG = '#0E0E0E';
 const GREEN = '#44ff75';
 const DIVIDER = '#2B2B2B';
 const DECLINE_BG = '#5F5B60';

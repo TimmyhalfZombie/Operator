@@ -5,11 +5,12 @@ import { config } from './config';
 
 import assistRoutes from './routes/assist';
 import authRoutes from './routes/auth';
-import geoRoutes from './routes/geo';
-import operatorRoutes from './routes/operator';
-import messagesRoutes from './routes/messages';
 import conversationsRoutes from './routes/conversations';
+import geoRoutes from './routes/geo';
+import messagesRoutes from './routes/messages';
+import operatorRoutes from './routes/operator';
 // 👇 NEW
+import ratingsRoutes from './routes/ratings';
 import routeRoutes from './routes/route';
 
 const app = express();
@@ -45,6 +46,7 @@ app.use('/api/messages', messagesRoutes);
 
 // 👇 NEW: ORS routing proxy
 app.use('/api/route', routeRoutes);
+app.use('/api/ratings', ratingsRoutes);
 
 /* ---------- 404 & error ---------- */
 app.use((_req, res) => res.status(404).json({ message: 'Not found' }));

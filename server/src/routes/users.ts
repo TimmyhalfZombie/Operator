@@ -8,39 +8,54 @@ const router = Router();
 /** Normalize/whitelist outgoing user fields. Returns both snake_case and camelCase so the client never misses. */
 function toPublicUser(u: any) {
   if (!u) return null;
+  const userObj = u as Record<string, any>;
 
   // prefer explicit initial_* fields; fall back to nested location.*
   const initial_lat =
-    u.initial_lat ?? u.initialLat ?? u.location?.initial_lat ?? u.location?.initialLat ?? u.lat ?? u.location?.lat ?? null;
+    userObj.initial_lat ?? userObj.initialLat ?? userObj.location?.initial_lat ?? userObj.location?.initialLat ?? userObj.lat ?? userObj.location?.lat ?? null;
 
   const initial_long =
-    u.initial_long ??
-    u.initialLong ??
-    u.initial_lng ??
-    u.initialLng ??
-    u.location?.initial_long ??
-    u.location?.initialLong ??
-    u.location?.initial_lng ??
-    u.location?.initialLng ??
-    u.lng ??
-    u.location?.lng ??
+    userObj.initial_long ??
+    userObj.initialLong ??
+    userObj.initial_lng ??
+    userObj.initialLng ??
+    userObj.location?.initial_long ??
+    userObj.location?.initialLong ??
+    userObj.location?.initial_lng ??
+    userObj.location?.initialLng ??
+    userObj.lng ??
+    userObj.location?.lng ??
     null;
 
   const initial_address =
-    u.initial_address ??
-    u.initialAddress ??
-    u.location?.initial_address ??
-    u.location?.initialAddress ??
-    u.address ??
-    u.location?.address ??
+    userObj.initial_address ??
+    userObj.initialAddress ??
+    userObj.location?.initial_address ??
+    userObj.location?.initialAddress ??
+    userObj.address ??
+    userObj.location?.address ??
     null;
 
+  const composedName = [userObj.firstName, userObj.lastName].filter(Boolean).join(' ').trim() || null;
+  const name = userObj.name ?? composedName ?? null;
+  const phone =
+    userObj.phone ??
+    userObj.phoneNumber ??
+    userObj.customerPhone ??
+    userObj.contactPhone ??
+    userObj.mobile ??
+    userObj.tel ??
+    null;
+  const email = userObj.email ?? userObj.contactEmail ?? userObj.username ?? null;
+  const username = userObj.username ?? name ?? email ?? null;
+
   const base = {
-    _id: String(u._id ?? u.id ?? ''),
-    name: u.name ?? null,
-    email: u.email ?? null,
-    phone: u.phone ?? null,
-    avatar: u.avatar ?? null,
+    _id: String(userObj._id ?? userObj.id ?? ''),
+    name,
+    username,
+    email,
+    phone,
+    avatar: userObj.avatar ?? null,
 
     // canonical (snake_case)
     initial_lat,
@@ -53,11 +68,11 @@ function toPublicUser(u: any) {
     initialAddress: initial_address,
 
     // last known current coords if you keep them
-    lat: u.lat ?? u.location?.lat ?? null,
-    lng: u.lng ?? u.location?.lng ?? null,
-    address: u.address ?? u.location?.address ?? null,
+    lat: userObj.lat ?? userObj.location?.lat ?? null,
+    lng: userObj.lng ?? userObj.location?.lng ?? null,
+    address: userObj.address ?? userObj.location?.address ?? null,
 
-    updated_at: u.updated_at ?? u.updatedAt ?? u.location?.updated_at ?? u.location?.updatedAt ?? null,
+    updated_at: userObj.updated_at ?? userObj.updatedAt ?? userObj.location?.updated_at ?? userObj.location?.updatedAt ?? null,
   };
 
   return base;
@@ -68,11 +83,11 @@ async function findUserDocById(userId: string) {
   const coll = db.collection('users');
 
   // Support ObjectId or string id
-  const filter = Types.ObjectId.isValid(userId)
+  const filter: Record<string, any> = Types.ObjectId.isValid(userId)
     ? { _id: new Types.ObjectId(userId) }
     : { _id: userId };
 
-  return coll.findOne(filter);
+  return coll.findOne(filter as any);
 }
 
 /** GET /api/users/me – return my profile with initial_* */
@@ -113,6 +128,7 @@ router.get('/me/location', requireAuth, async (req: any, res) => {
     if (!doc) return res.status(404).json({ message: 'User not found' });
 
     const u = toPublicUser(doc);
+    if (!u) return res.status(404).json({ message: 'User not found' });
     return res.json({
       lat: (u.initial_lat ?? u.lat) ?? null,
       lng: (u.initial_long ?? u.lng) ?? null,
@@ -147,12 +163,12 @@ router.post('/me/location', requireAuth, async (req: any, res) => {
     const db = await getCustomerDb();
     const coll = db.collection('users');
 
-    const filter = Types.ObjectId.isValid(meId)
+    const filter: Record<string, any> = Types.ObjectId.isValid(meId)
       ? { _id: new Types.ObjectId(meId) }
       : { _id: meId };
 
     // Read current doc to only set initial_* once
-    const existing = await coll.findOne(filter);
+    const existing = await coll.findOne(filter as any);
 
     const $set: any = {
       'location.updated_at': new Date(),
@@ -174,8 +190,8 @@ router.post('/me/location', requireAuth, async (req: any, res) => {
       }
     }
 
-    await coll.updateOne(filter, { $set }, { upsert: true });
-    const fresh = await coll.findOne(filter);
+    await coll.updateOne(filter as any, { $set }, { upsert: true });
+    const fresh = await coll.findOne(filter as any);
     return res.json(toPublicUser(fresh));
   } catch (e: any) {
     return res.status(500).json({ message: e?.message ?? 'Failed to update location' });

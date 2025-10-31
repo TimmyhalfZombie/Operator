@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import { AppState } from 'react-native';
 import { getAssistByAnyId } from '../../features/assistance/api';
+import { fetchCustomerRating } from '../../features/ratings/api';
 import { getCompletedByAnyId } from '../../lib/completedCache';
 
 export function fmtRange(a?: string, b?: string) {
@@ -39,6 +40,7 @@ export function useActivityDetail() {
   const [loading, setLoading] = React.useState(!!requestId);
   const [err, setErr] = React.useState('');
   const [doc, setDoc] = React.useState<any | null>(null);
+  const [externalRating, setExternalRating] = React.useState<number | null>(null);
   const [msgBusy, setMsgBusy] = React.useState(false);
 
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -138,6 +140,57 @@ export function useActivityDetail() {
     };
   }, [loadData, schedule]);
 
+  const ratingUserId = React.useMemo(() => {
+    if (!doc) return null;
+    const candidates = [
+      doc.userId,
+      doc.customerId,
+      doc.clientId,
+      doc?.user?._id,
+      doc?.customer?._id,
+      doc?.client?._id,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim();
+      if (c && typeof c === 'object' && typeof c.toString === 'function') {
+        const s = String(c);
+        if (s.trim()) return s.trim();
+      }
+    }
+    return null;
+  }, [doc]);
+
+  const lastRatingIdRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const userId = ratingUserId;
+    if (!userId) {
+      setExternalRating(null);
+      lastRatingIdRef.current = null;
+      return () => { cancelled = true; };
+    }
+    if (lastRatingIdRef.current === userId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    lastRatingIdRef.current = userId;
+    (async () => {
+      try {
+        const res = await fetchCustomerRating(userId);
+        if (cancelled) return;
+        const avg = res?.average;
+        setExternalRating(typeof avg === 'number' && Number.isFinite(avg) ? avg : null);
+      } catch {
+        if (!cancelled) setExternalRating(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ratingUserId]);
+
   // ---- render prep values
   let customer: string = 'Customer', contactName: string | null = null, customerPhone: string | null = null, startName: string = 'Start', startAddr: string = '', endName: string = 'Vehicle', endAddr: string = 'Location', status: string = 'Repaired', timeRepaired: string | null = null, rating: number = 0, timeRange: string = '—', clientAvatar: string | null = null;
   
@@ -195,8 +248,9 @@ export function useActivityDetail() {
     status = (doc?.status || (p as any).status || 'Repaired') as string;
     timeRepaired = doc?.completedAt ? new Date(doc.completedAt).toLocaleString() : null;
 
-    const ratingNum = Number(doc?._raw?.rating ?? (doc?.rating as any) ?? (p as any).rating ?? 0);
-    rating = Math.max(0, Math.min(5, Number.isFinite(ratingNum) ? ratingNum : 0));
+    const fallbackRating = Number(doc?._raw?.rating ?? (doc?.rating as any) ?? (p as any).rating ?? 0);
+    const ratingSource = externalRating ?? (Number.isFinite(fallbackRating) ? fallbackRating : 0);
+    rating = Math.max(0, Math.min(5, Number.isFinite(ratingSource) ? ratingSource : 0));
 
     timeRange = (p as any).timeRange || fmtRange(doc?.createdAt, doc?.updatedAt) || '—';
   }
