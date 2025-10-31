@@ -114,21 +114,25 @@ export default function TemperatureDial({
           />
 
           {/* Progress */}
-          {progress > 0 && progress >= 0.999 ? (
-            <Circle
-              cx={cx}
-              cy={cy}
-              r={trackRadius}
-              stroke={progressColor}
-              strokeWidth={outerStroke}
-              fill="none"
-            />
-          ) : null}
-          {progress > 0 && progress < 0.999 ? (() => {
+          {progress > 0 ? (() => {
+            if (progress >= 0.999) {
+              return (
+                <Circle
+                  cx={cx}
+                  cy={cy}
+                  r={trackRadius}
+                  stroke={progressColor}
+                  strokeWidth={outerStroke}
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              );
+            }
             const largeArc = sweepDeg > 180 ? 1 : 0;
             const arcStart = polarToCartesian(cx, cy, trackRadius, startAngle);
             const arcEnd = polarToCartesian(cx, cy, trackRadius, endAngle);
-            const d = `M ${arcStart.x} ${arcStart.y} A ${trackRadius} ${trackRadius} 0 ${largeArc} 1 ${arcEnd.x} ${arcEnd.y}`;
+            const adjRadius = trackRadius;
+            const d = `M ${arcStart.x} ${arcStart.y} A ${adjRadius} ${adjRadius} 0 ${largeArc} 1 ${arcEnd.x} ${arcEnd.y}`;
             return (
               <Path
                 d={d}
