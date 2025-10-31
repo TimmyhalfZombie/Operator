@@ -1,22 +1,24 @@
+import * as Icons from 'phosphor-react-native';
 import React from 'react';
 import {
-  View,
+  Linking,
+  StyleProp,
+  StyleSheet,
   Text,
   TouchableOpacity,
-  StyleSheet,
+  View,
   ViewStyle,
-  StyleProp,
-  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Icons from 'phosphor-react-native';
 
-const BG = '#0E0E0E';
+const BG = 'rgba(14, 14, 14, 14)';
 const GREEN = '#44ff75';
 const DIVIDER = '#2B2B2B';
 const DECLINE_BG = '#5F5B60';
 const TEXT_MUTED = '#CFCFCF';
 const LIGHT_PILL = '#DFFFEA';
+const INTER_BLACK = 'Inter-Black';
+const INTER_BOLD = 'Inter-Bold';
 
 type Props = {
   clientName: string;
@@ -144,8 +146,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  clientName: { color: GREEN, fontWeight: '800', fontSize: 18, marginBottom: 6 },
-  title: { color: '#FFF', fontSize: 18, fontWeight: '700', marginBottom: 6 },
+  clientName: { color: GREEN, fontSize: 18, marginBottom: 6, fontFamily: INTER_BLACK },
+  title: { color: '#FFF', fontSize: 18, fontWeight: '700', marginBottom: 6, fontFamily: INTER_BOLD },
   address: { color: TEXT_MUTED, fontSize: 13 },
 
   messageBtn: {

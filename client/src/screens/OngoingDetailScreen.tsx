@@ -2,7 +2,15 @@
 import { router } from 'expo-router';
 import * as Icons from 'phosphor-react-native';
 import React from 'react';
-import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Text as RNText,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+  type TextProps,
+} from 'react-native';
 import GeoapifyMap from '../components/GeoapifyMap';
 import useAcceptedJobUI from '../features/useAcceptedJobUI';
 import { useActivityDetail } from './functions/activityDetail';
@@ -36,6 +44,10 @@ type Params = {
   status?: string;
   rating?: string;
 };
+
+function Text(props: TextProps) {
+  return <RNText {...props} style={[{ fontFamily: INTER_BLACK }, props.style]} />;
+}
 
 export default function OngoingDetailScreen() {
   const {
@@ -142,9 +154,9 @@ const styles = StyleSheet.create({
   },
 
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 64,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#000000ff',
     alignItems: 'center',
     justifyContent: 'center',
