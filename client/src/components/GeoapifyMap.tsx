@@ -1,8 +1,10 @@
 // client/src/components/GeoapifyMap.tsx
 import MapLibreGL from '@maplibre/maplibre-react-native';
+import * as ExpoLocation from 'expo-location';
 import React from 'react';
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { http } from '../lib/http';
+import type { OrsRouteResponse } from '../lib/routing';
 import { getRouteORS, toFeatureCollection } from '../lib/routing';
 import UserPin from './ClientPin';
 import OperatorPin from './OperatorPin';
@@ -18,6 +20,8 @@ type Props = {
   showOperator?: boolean;
   /** Skip auto-zoom if true */
   disableAutoZoom?: boolean;
+  /** Use device GPS instead of fetching from the server */
+  autoUseDeviceLocation?: boolean;
 };
 
 type OperatorLocation = { lat: number; lng: number; updated_at?: string };
@@ -28,17 +32,6 @@ function isNum(v: any): v is number {
 
 MapLibreGL.setAccessToken(null);
 
-// Fetch the operator (current user) location (server returns from appdb.users)
-async function fetchOperatorLocation(): Promise<OperatorLocation | null> {
-  try {
-    const data = await http.get('/api/users/me/location', { auth: true });
-    if (!isNum((data as any)?.lat) || !isNum((data as any)?.lng)) return null;
-    return { lat: (data as any).lat, lng: (data as any).lng, updated_at: (data as any).updated_at };
-  } catch {
-    return null;
-  }
-}
-
 export default function GeoapifyMap({
   lat,
   lng,
@@ -46,6 +39,7 @@ export default function GeoapifyMap({
   style,
   showOperator = true,
   disableAutoZoom = false,
+  autoUseDeviceLocation,
 }: Props) {
   const clientOk = isNum(lat) && isNum(lng);
   const clientCenter: [number, number] = [lng ?? 0, lat ?? 0];
@@ -54,7 +48,42 @@ export default function GeoapifyMap({
   const [op, setOp] = React.useState<OperatorLocation | null>(null);
   const [routeFC, setRouteFC] = React.useState<any | null>(null);
 
-  const camRef = React.useRef<MapLibreGL.Camera>(null);
+  const shouldUseDeviceGps = autoUseDeviceLocation ?? showOperator;
+
+async function getOsrmFallback(from: [number, number], to: [number, number]): Promise<OrsRouteResponse | null> {
+  try {
+    const params = new URLSearchParams({
+      from: `${from[0]},${from[1]}`,
+      to: `${to[0]},${to[1]}`,
+      mode: 'drive',
+    });
+    const data = await http.get(`/api/geo/route?${params.toString()}`);
+    const coords: [number, number][] | undefined = data?.features?.[0]?.geometry?.coordinates;
+    if (Array.isArray(coords) && coords.length >= 2) {
+      const fc: OrsRouteResponse = {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: coords,
+            },
+            properties: {
+              source: 'osrm',
+            },
+          },
+        ],
+      };
+      return fc;
+    }
+  } catch (e) {
+    console.warn?.('OSRM fallback failed', e);
+  }
+  return null;
+}
+
+  const camRef = React.useRef<React.ComponentRef<typeof MapLibreGL.Camera>>(null);
   const userHasTakenControl = React.useRef(false);
   const lastAutoCentered = React.useRef<string | null>(null);
   const autoZoomRetryRef = React.useRef(0);
@@ -65,31 +94,71 @@ export default function GeoapifyMap({
     if (byUser) userHasTakenControl.current = true;
   }, []);
 
-  // Poll operator location only when we should show the operator (i.e., after Accept)
+  // Subscribe to device GPS when requested (operator device)
   React.useEffect(() => {
-    if (!showOperator) {
-      setOp(null);
-      return;
-    }
-    let alive = true;
-    let t: any;
-    async function tick() {
-      const loc = await fetchOperatorLocation();
-      if (alive) setOp(loc ?? null);
-      t = setTimeout(tick, 5000);
-    }
-    tick();
-    return () => {
-      alive = false;
-      clearTimeout(t);
+    let cancelled = false;
+    let subscription: ExpoLocation.LocationSubscription | null = null;
+
+    const stop = () => {
+      subscription?.remove();
+      subscription = null;
     };
-  }, [showOperator]);
+
+    async function start() {
+      if (!showOperator || !shouldUseDeviceGps) {
+        setOp(null);
+        return;
+      }
+
+      try {
+        const perm = await ExpoLocation.requestForegroundPermissionsAsync();
+        if (perm.status !== 'granted') {
+          setOp(null);
+          return;
+        }
+
+        const seed = await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.Balanced });
+        if (!cancelled) {
+          setOp({
+            lat: seed.coords.latitude,
+            lng: seed.coords.longitude,
+            updated_at: new Date(seed.timestamp).toISOString(),
+          });
+        }
+
+        subscription = await ExpoLocation.watchPositionAsync(
+          {
+            accuracy: ExpoLocation.Accuracy.BestForNavigation,
+            distanceInterval: 0,
+            timeInterval: 250,
+          },
+          (position) => {
+            if (cancelled) return;
+            setOp({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              updated_at: new Date(position.timestamp).toISOString(),
+            });
+          }
+        );
+      } catch {
+        if (!cancelled) setOp(null);
+      }
+    }
+
+    start();
+
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [showOperator, shouldUseDeviceGps]);
 
   // Route overlay when both ends exist (operator -> client blue dot)
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!clientOk || !op) {
+      if (!clientOk || !op || !showOperator) {
         if (!cancelled) setRouteFC(null);
         return;
       }
@@ -101,7 +170,41 @@ export default function GeoapifyMap({
         ],
         'driving-car'
       );
-      if (!cancelled) setRouteFC(toFeatureCollection(route));
+      if (cancelled) return;
+
+      let fc = toFeatureCollection(route);
+
+      if (!fc) {
+        fc = await getOsrmFallback(
+          [op.lng, op.lat],
+          [clientCenter[0], clientCenter[1]]
+        );
+        if (cancelled) return;
+      }
+
+      if (!fc) {
+        const straightLine: OrsRouteResponse = {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [op.lng, op.lat],
+                  [clientCenter[0], clientCenter[1]],
+                ],
+              },
+              properties: {
+                source: 'straight-line',
+              },
+            },
+          ],
+        };
+        fc = straightLine;
+      }
+
+      if (!cancelled) setRouteFC(fc);
     })();
     return () => {
       cancelled = true;
@@ -185,7 +288,7 @@ export default function GeoapifyMap({
           <MapLibreGL.ShapeSource id="route" shape={routeFC}>
             <MapLibreGL.LineLayer
               id="route-line"
-              style={{ lineColor: '#00B3FF', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.95 }}
+              style={{ lineColor: '#8B5CF6', lineWidth: 5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.95 }}
             />
           </MapLibreGL.ShapeSource>
         )}
@@ -197,7 +300,12 @@ export default function GeoapifyMap({
 
         {/* Operator = your app device location */}
         {showOperator && op && isNum(op.lat) && isNum(op.lng) && (
-          <MapLibreGL.MarkerView id="operator-pin" coordinate={[op.lng, op.lat]} anchor={{ x: 0.5, y: 0.5 }}>
+          <MapLibreGL.MarkerView
+            id="operator-pin"
+            key={op.updated_at ?? `${op.lat},${op.lng}`}
+            coordinate={[op.lng, op.lat]}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
             <OperatorPin />
           </MapLibreGL.MarkerView>
         )}
