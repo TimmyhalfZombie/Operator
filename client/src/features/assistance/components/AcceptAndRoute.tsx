@@ -15,8 +15,8 @@ export default function AcceptAndRoute({ request, onAccepted, style }: Props) {
   const [accepted, setAccepted] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
 
-  const clientLat = request?.coords?.lat ?? null;
-  const clientLng = request?.coords?.lng ?? null;
+  const clientLat = toNum(request?.coords?.lat);
+  const clientLng = toNum(request?.coords?.lng);
 
   const handleAccept = async () => {
     if (!request?.id || busy) return;
@@ -59,3 +59,8 @@ export default function AcceptAndRoute({ request, onAccepted, style }: Props) {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
 });
+
+function toNum(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}

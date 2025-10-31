@@ -126,8 +126,8 @@ export default function OngoingDetailScreen() {
 
       {/* Map Background */}
       <GeoapifyMap
-        lat={doc?.coords?.lat || doc?.location?.coordinates?.[1] || null}
-        lng={doc?.coords?.lng || doc?.location?.coordinates?.[0] || null}
+        lat={coerceLat(doc)}
+        lng={coerceLng(doc)}
         showOperator={true}
         autoUseDeviceLocation={true}
         style={styles.mapContainer}
@@ -168,3 +168,46 @@ const styles = StyleSheet.create({
     width: '100%',
   },
 });
+
+function toNum(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function coerceLat(doc: any): number | null {
+  if (!doc) return null;
+  const direct = toNum(doc?.coords?.lat);
+  if (direct != null) return direct;
+  const locLat = toNum(doc?.location?.lat ?? doc?.address?.lat);
+  if (locLat != null) return locLat;
+  const coords = doc?.location?.coordinates ?? doc?.location?.coordinate ?? doc?.coordinates;
+  if (Array.isArray(coords) && coords.length >= 2) {
+    const fromArray = toNum(coords[1]);
+    if (fromArray != null) return fromArray;
+  }
+  const geoPoint = doc?.location?.geometry?.coordinates;
+  if (Array.isArray(geoPoint) && geoPoint.length >= 2) {
+    const fromGeometry = toNum(geoPoint[1]);
+    if (fromGeometry != null) return fromGeometry;
+  }
+  return null;
+}
+
+function coerceLng(doc: any): number | null {
+  if (!doc) return null;
+  const direct = toNum(doc?.coords?.lng ?? doc?.coords?.lon ?? doc?.coords?.longitude);
+  if (direct != null) return direct;
+  const locLng = toNum(doc?.location?.lng ?? doc?.location?.lon ?? doc?.location?.longitude ?? doc?.address?.lng);
+  if (locLng != null) return locLng;
+  const coords = doc?.location?.coordinates ?? doc?.location?.coordinate ?? doc?.coordinates;
+  if (Array.isArray(coords) && coords.length >= 2) {
+    const fromArray = toNum(coords[0]);
+    if (fromArray != null) return fromArray;
+  }
+  const geoPoint = doc?.location?.geometry?.coordinates;
+  if (Array.isArray(geoPoint) && geoPoint.length >= 2) {
+    const fromGeometry = toNum(geoPoint[0]);
+    if (fromGeometry != null) return fromGeometry;
+  }
+  return null;
+}
