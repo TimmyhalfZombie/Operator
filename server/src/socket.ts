@@ -235,6 +235,16 @@ async function buildConversationPayload(convDoc: any, currentUserId: string, opt
   };
 }
 
+function sanitizeMessageText(raw: any): string {
+  const collapsed = String(raw ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
+  if (!collapsed) return '';
+  const tokens = collapsed.split(' ');
+  if (tokens.length > 1 && tokens.every((tok) => tok.length === 1)) {
+    return tokens.join('');
+  }
+  return collapsed;
+}
+
 function emitToUser(io: Server, userId: string, event: string, payload: any) {
   io.sockets.sockets.forEach((client) => {
     const clientUser = (client as any).user as JwtUser | undefined;
@@ -556,7 +566,7 @@ export function initSocket(httpServer: HTTPServer) {
     }) {
       const conversationId = String(p?.conversationId || '');
       const rawContent = p?.text ?? p?.content;
-      const text = typeof rawContent === 'string' ? rawContent.replace(/[\r\n]+/g, ' ').trim() : '';
+      const text = typeof rawContent === 'string' ? sanitizeMessageText(rawContent) : '';
       const attachment = p?.attachment ? String(p.attachment) : null;
       const tempId = p?.tempId;
 

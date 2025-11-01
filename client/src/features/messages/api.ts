@@ -42,6 +42,17 @@ function toId(v: any): string {
   if (typeof v === 'object') return String(v._id ?? v.id ?? '');
   return String(v);
 }
+
+function cleanMessageText(val: any): string {
+  const collapsed = String(val ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
+  if (!collapsed) return '';
+  const tokens = collapsed.split(' ');
+  if (tokens.length > 1 && tokens.every((tok) => tok.length === 1)) {
+    return tokens.join('');
+  }
+  return collapsed;
+}
+
 function normalizeMsg(raw: any): ChatMessage {
   return {
     id: toId(raw?._id ?? raw?.id),
@@ -58,7 +69,7 @@ function normalizeMsg(raw: any): ChatMessage {
         raw?.sender ??
         raw?.from
     ),
-    text: String(raw?.content ?? raw?.text ?? '').replace(/[\r\n]+/g, ' '),
+    text: cleanMessageText(raw?.content ?? raw?.text ?? ''),
     createdAt: new Date(
       raw?.createdAt ??
         raw?.created_at ??
@@ -240,7 +251,7 @@ export async function sendMessage(
 ): Promise<ChatMessage> {
   const payload = {
     conversationId: String(conversationId),
-    content: String(text ?? '').trim(),
+    content: cleanMessageText(text),
   };
 
   try {
@@ -255,7 +266,7 @@ export async function sendMessage(
     id: `tmp_${Math.random().toString(36).slice(2, 8)}`,
     conversationId: String(conversationId),
     from: myId ?? 'me',
-    text: payload.content,
+    text: cleanMessageText(payload.content),
     createdAt: new Date().toISOString(),
     pending: true,
   };

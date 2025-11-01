@@ -7,6 +7,16 @@ import { ConversationMeta } from '../models/conversationMeta';
 import { Message } from '../models/message';
 import { getIO } from '../socket';
 
+function sanitizeMessageText(raw: any): string {
+  const collapsed = String(raw ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
+  if (!collapsed) return '';
+  const tokens = collapsed.split(' ');
+  if (tokens.length > 1 && tokens.every((tok) => tok.length === 1)) {
+    return tokens.join('');
+  }
+  return collapsed;
+}
+
 const r = Router();
 
 function isValidOid(v: string | undefined | null): v is string { return !!v && Types.ObjectId.isValid(v); }
@@ -395,7 +405,7 @@ r.post('/ensure', requireAuth as any, async (req: any, res) => {
 r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   const convId = String(req.params.id || '');
-  const text = String((req.body as any)?.text || '').replace(/[\r\n]+/g, ' ').trim();
+  const text = sanitizeMessageText((req.body as any)?.text || '');
 
   if (!isValidOid(convId)) return res.status(404).json({ error: 'not found' });
   if (!text) return res.status(400).json({ error: 'Text is required' });

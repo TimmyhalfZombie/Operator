@@ -39,8 +39,9 @@ import {
   sendTextMessage,
 } from './functions/chat';
 
-const BG = '#0E0E0E';
+const BG = '#9FE5B6';
 const MINE_BG = '#6EFF87';
+const HEADER_BG = '#0C0C0C';
 const TEXT_DARK = '#0C0C0C';
 const TEXT_LIGHT = '#EDEDED';
 const BORDER = '#262626';
@@ -51,6 +52,16 @@ function Text(props: TextProps) {
 }
 function TextInput(props: TextInputProps) {
   return <RNTextInput {...props} style={[{ fontFamily: 'Inter-Bold' }, props.style]} />;
+}
+
+function normalizeMessageText(val: string): string {
+  const collapsed = String(val ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
+  if (!collapsed) return '';
+  const tokens = collapsed.split(' ');
+  if (tokens.length > 1 && tokens.every((tok) => tok.length === 1)) {
+    return tokens.join('');
+  }
+  return collapsed;
 }
 
 export default function ChatScreen() {
@@ -182,7 +193,7 @@ export default function ChatScreen() {
         id: String(m._id),
         conversationId: String(m.conversationId),
         from: String(m.senderId?._id || m.senderId),
-        text: String(m.content ?? '').replace(/[\r\n]+/g, ' '),
+        text: normalizeMessageText(String(m.content ?? '')),
         imageUri: attachMap[String(m._id)] || (m.attachment ? String(m.attachment) : null),
         createdAt,
       };
@@ -260,7 +271,7 @@ export default function ChatScreen() {
           return {
             ...m,
             from: mine ? myId || 'me' : String(m.from),
-            text: (m.text ?? '').replace(/[\r\n]+/g, ' '),
+            text: normalizeMessageText(m.text ?? ''),
             imageUri: attachMap[m.id] ?? (m as any).attachment ?? null,
             pending: false,
             failed: false,
@@ -292,7 +303,7 @@ export default function ChatScreen() {
   async function handleSend() {
     const raw = input.trim();
     if (!raw || !conversationId || conversationId === 'new') return;
-    const text = raw.replace(/[\r\n]+/g, ' ');
+    const text = normalizeMessageText(raw);
     setInput('');
     await sendTextMessage(
       conversationId,
@@ -346,8 +357,8 @@ export default function ChatScreen() {
             const normalized = {
               ...(saved as LocalMessage),
               from: myId || 'me',
+              text: normalizeMessageText((saved as LocalMessage)?.text ?? ''),
               imageUri,
-              text: (saved as LocalMessage)?.text ? (saved as LocalMessage).text.replace(/[\r\n]+/g, ' ') : '',
               pending: false,
               failed: false,
             };
@@ -384,8 +395,8 @@ export default function ChatScreen() {
             const normalized = {
               ...(saved as LocalMessage),
               from: myId || 'me',
+              text: normalizeMessageText((saved as LocalMessage)?.text ?? ''),
               imageUri,
-              text: (saved as LocalMessage)?.text ? (saved as LocalMessage).text.replace(/[\r\n]+/g, ' ') : '',
               pending: false,
               failed: false,
             };
@@ -457,7 +468,7 @@ export default function ChatScreen() {
       style={styles.container}
       behavior={Platform.select({ ios: 'padding', android: undefined })}
     >
-      <StatusBar style="dark" translucent backgroundColor="transparent" />
+      <StatusBar style="light" translucent backgroundColor="transparent" />
 
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerBar}>
@@ -468,7 +479,7 @@ export default function ChatScreen() {
             style={styles.backBtn}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Icons.ArrowLeft size={22} color={TEXT_DARK} weight="bold" />
+            <Icons.ArrowLeft size={22} color={MINE_BG} weight="bold" />
           </TouchableOpacity>
 
           <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
@@ -582,7 +593,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
 
   header: {
-    backgroundColor: MINE_BG,
+    backgroundColor: HEADER_BG,
   },
   headerBar: {
     height: HEADER_CONTENT_HEIGHT,
@@ -602,7 +613,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    color: TEXT_DARK,
+    color: MINE_BG,
     fontSize: 18,
     fontFamily: 'Inter-Black',
     marginTop: 2,
@@ -618,17 +629,18 @@ const styles = StyleSheet.create({
   rowTheirs: { justifyContent: 'flex-start' },
 
   bubble: {
-    maxWidth: '78%',
+    maxWidth: '90%',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 14,
     gap: 6,
+    borderWidth: 0.5,
+    borderColor: '#000000',
   },
   bubbleMine: {
     backgroundColor: MINE_BG,
     borderTopRightRadius: 4,
     alignSelf: 'flex-end',
-    width: '100%',
   },
   bubbleTheirs: { backgroundColor: '#1C1C1C', borderTopLeftRadius: 4 },
 
@@ -641,7 +653,7 @@ const styles = StyleSheet.create({
 
   msgText: { fontSize: 15, lineHeight: 20, fontFamily: 'Inter-Bold' },
   msgMine: { color: TEXT_DARK, textAlign: 'left' },
-  msgTheirs: { color: TEXT_LIGHT, textAlign: 'left' },
+  msgTheirs: { color: TEXT_DARK, textAlign: 'left' },
 
   image: {
     width: 220,
@@ -661,13 +673,15 @@ const styles = StyleSheet.create({
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: BORDER,
+    marginBottom: 10,
+    paddingBottom: 20,
   },
   attachBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
     backgroundColor: '#C0FFCB',
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#000000ff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -687,9 +701,11 @@ const styles = StyleSheet.create({
   sendBtn: {
     width: 44,
     height: 44,
-    borderRadius: 10,
+    borderRadius: 22,
     backgroundColor: '#C0FFCB',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#000000',
   },
 });
