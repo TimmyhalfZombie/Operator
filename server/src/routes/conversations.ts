@@ -395,7 +395,7 @@ r.post('/ensure', requireAuth as any, async (req: any, res) => {
 r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   const convId = String(req.params.id || '');
-  const text = String((req.body as any)?.text || '').trim();
+  const text = String((req.body as any)?.text || '').replace(/[\r\n]+/g, ' ').trim();
 
   if (!isValidOid(convId)) return res.status(404).json({ error: 'not found' });
   if (!text) return res.status(400).json({ error: 'Text is required' });

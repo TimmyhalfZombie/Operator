@@ -556,7 +556,7 @@ export function initSocket(httpServer: HTTPServer) {
     }) {
       const conversationId = String(p?.conversationId || '');
       const rawContent = p?.text ?? p?.content;
-      const text = typeof rawContent === 'string' ? rawContent.trim() : '';
+      const text = typeof rawContent === 'string' ? rawContent.replace(/[\r\n]+/g, ' ').trim() : '';
       const attachment = p?.attachment ? String(p.attachment) : null;
       const tempId = p?.tempId;
 

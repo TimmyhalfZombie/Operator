@@ -628,6 +628,7 @@ const styles = StyleSheet.create({
     backgroundColor: MINE_BG,
     borderTopRightRadius: 4,
     alignSelf: 'flex-end',
+    width: '100%',
   },
   bubbleTheirs: { backgroundColor: '#1C1C1C', borderTopLeftRadius: 4 },
 
