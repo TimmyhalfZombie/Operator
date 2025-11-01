@@ -40,7 +40,8 @@ import {
   sendTextMessage,
 } from './functions/chat';
 
-const BG = '#CFFFE0';
+const BG = '#E7FFE9';
+const CONTROL_BG = '#DAFFD1';
 const MINE_BG = '#6EFF87';
 const HEADER_BG = '#0C0C0C';
 const TEXT_DARK = '#0C0C0C';
@@ -704,7 +705,8 @@ const styles = StyleSheet.create({
     backgroundColor: MINE_BG,
     borderTopRightRadius: 4,
     alignSelf: 'flex-end',
-    borderWidth: 0,
+    borderWidth: 0.5,
+    borderColor: '#000000',
   },
   bubbleTheirs: {
     backgroundColor: '#222020ff',
@@ -737,7 +739,7 @@ const styles = StyleSheet.create({
   msgText: {
     fontSize: 17,
     lineHeight: 22,
-    fontFamily: 'Inter-Bold',
+    fontFamily: 'Inter-Regular',
   },
 
   msgMine: {
@@ -768,11 +770,12 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#C0FFCB',
+    backgroundColor: CONTROL_BG,
     borderWidth: 1,
     borderColor: '#000000ff',
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 3,
   },
   input: {
     flex: 1,
@@ -781,21 +784,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: '#C0FFCB',
+    backgroundColor: CONTROL_BG,
     color: TEXT_DARK,
     fontSize: 15,
     fontFamily: 'Inter-Bold',
     borderWidth: 1,
-    borderColor: '#0A7F34',
+    borderColor: '#000000ff',
   },
   sendBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#C0FFCB',
+    backgroundColor: CONTROL_BG,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#000000',
+    marginBottom: 3,
   },
 });
