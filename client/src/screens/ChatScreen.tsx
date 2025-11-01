@@ -693,7 +693,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: '#151515',
+    backgroundColor: '#C0FFCB',
     color: TEXT_LIGHT,
     fontSize: 15,
     fontFamily: 'Inter-Bold',
