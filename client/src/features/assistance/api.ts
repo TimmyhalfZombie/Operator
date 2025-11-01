@@ -46,6 +46,16 @@ function normalize(raw: any): AssistanceRequest {
 
 /** Get newest pending request for the operator. */
 export async function fetchNextAssist(): Promise<AssistanceRequest | null> {
+  try {
+    const accepted = await fetchAssistInbox({ status: 'accepted', limit: 1 });
+    if (Array.isArray(accepted) && accepted.length > 0) {
+      return null;
+    }
+  } catch (err) {
+    // If inbox fetch fails, continue and let /next handle errors
+    console.warn('[assist] fetchNextAssist: failed to check accepted requests', (err as Error)?.message ?? err);
+  }
+
   const res = await api('/api/assist/next', { method: 'GET', auth: true });
   const body = (res && (res as any).data !== undefined ? (res as any).data : res) as any;
   const raw = body && body.data !== undefined ? body.data : body;

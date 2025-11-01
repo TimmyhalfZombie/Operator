@@ -83,10 +83,24 @@ export function useActivity() {
   const ongoingItems = useMemo(() => 
     items.filter(i => (i.status || 'pending') === 'accepted'), [items]
   );
+
+  const hasOngoing = useMemo(() => ongoingItems.length > 0, [ongoingItems.length]);
+  
+  const filteredNewItems = useMemo(() => hasOngoing ? [] : newItems, [hasOngoing, newItems]);
   
   const recentItems = useMemo(() => 
     items.filter(i => (i.status || 'pending') !== 'pending' && (i.status || 'pending') !== 'accepted'), [items]
   );
 
-  return { items, newItems, ongoingItems, recentItems, loading, error, markAsDeclined, reload: () => load(false) };
+  return {
+    items,
+    newItems: filteredNewItems,
+    ongoingItems,
+    recentItems,
+    hasOngoing,
+    loading,
+    error,
+    markAsDeclined,
+    reload: () => load(false),
+  };
 }
