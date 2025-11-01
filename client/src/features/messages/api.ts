@@ -1,6 +1,7 @@
-// CLIENT-SIDE API WRAPPER (socket-first with HTTP fallback)
+// client/src/features/messages/api.ts
+// OPERATOR APP — socket-first API that uses acks (no more silent timeouts)
 import { api } from '../../lib/http';
-import { getSocket } from '../../lib/socket';
+import { emitWithAck } from '../../lib/socket';
 
 /* ---------------- types ---------------- */
 export type ConversationPreview = {
@@ -13,7 +14,7 @@ export type ConversationPreview = {
 };
 
 export type ConversationDetail = ConversationPreview & {
-  members?: string[];
+  participants?: string[];
   peer?: {
     id: string;
     username?: string;
@@ -43,135 +44,218 @@ function toId(v: any): string {
 }
 function normalizeMsg(raw: any): ChatMessage {
   return {
-    id: toId(raw?.id ?? raw?._id),
-    conversationId: toId(raw?.conversationId ?? raw?.conversation ?? raw?.convId),
-    from: toId(raw?.from ?? raw?.senderId ?? raw?.sender?._id ?? raw?.sender),
-    text: String(raw?.text ?? raw?.content ?? ''),
-    createdAt: new Date(raw?.createdAt ?? raw?.created_at ?? Date.now()).toISOString(),
+    id: toId(raw?._id ?? raw?.id),
+    conversationId: toId(
+      raw?.conversationId ??
+        raw?.conversation_id ??
+        raw?.conversation?.id ??
+        raw?.conversation?._id
+    ),
+    from: toId(
+      raw?.senderId?._id ??
+        raw?.senderId ??
+        raw?.sender?._id ??
+        raw?.sender ??
+        raw?.from
+    ),
+    text: String(raw?.content ?? raw?.text ?? ''),
+    createdAt: new Date(
+      raw?.createdAt ??
+        raw?.created_at ??
+        raw?.timestamp ??
+        Date.now()
+    ).toISOString(),
   };
 }
-function normalizeList(items: any[]): ChatMessage[] {
+function normalizeMsgList(items: any[]): ChatMessage[] {
   if (!Array.isArray(items)) return [];
   return items.map(normalizeMsg);
 }
 
-async function httpFetchMessages(conversationId: string, before?: string, limit = 50) {
-  const qs = new URLSearchParams();
-  if (before) qs.set('before', before);
-  if (limit) qs.set('limit', String(limit));
-  const res = await api(`/api/conversations/${conversationId}/messages?${qs.toString()}`, {
-    auth: true,
-    method: 'GET',
-  });
-  const items = (res?.items ?? res?.data?.items ?? []) as any[];
-  return normalizeList(items);
-}
+/* ---------------- conversations ---------------- */
 
-/* Small helper to await a one-off socket response */
-function onceWithTimeout<T = any>(event: string, timeoutMs: number, onAttach: () => void): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const s = getSocket();
-    if (!s) return reject(new Error('no_socket'));
-    const timer = setTimeout(() => {
-      try { s.off(event, handler as any); } catch {}
-      reject(new Error('timeout'));
-    }, timeoutMs);
-    function handler(payload: any) {
-      clearTimeout(timer);
-      try { s.off(event, handler as any); } catch {}
-      resolve(payload);
+/** Ensure a direct conversation between exactly two participants. */
+export async function ensureConversation(
+  peerUserId: string,
+  meUserId?: string,
+  options: { requestId?: string } = {}
+): Promise<{ id: string }> {
+  const participants = Array.from(
+    new Set(
+      [peerUserId, meUserId]
+        .filter(Boolean)
+        .map((p) => String(p))
+    )
+  ).sort();
+
+  let ackError: any = null;
+  if (participants.length >= 2) {
+    try {
+      const res: any = await emitWithAck('newConversation', {
+        type: 'direct',
+        participants,
+        name: '',
+      });
+
+      if (res?.success && res?.data?._id) {
+        return { id: String(res.data._id) };
+      }
+      ackError = res?.msg || 'failed_to_ensure_conversation';
+    } catch (err) {
+      ackError = err;
     }
-    s.once(event, handler);
-    onAttach();
-  });
-}
-
-/* ---------------- conversations (HTTP) ---------------- */
-export async function listConversations(limit = 50): Promise<ConversationPreview[]> {
-  const res = await api(`/api/conversations?limit=${limit}`, { auth: true, method: 'GET' });
-  return (res?.items ?? res?.data?.items ?? []) as ConversationPreview[];
-}
-
-export async function getConversation(conversationId: string): Promise<ConversationDetail> {
-  const res = await api(`/api/conversations/${conversationId}`, { auth: true, method: 'GET' });
-  return (res?.data ?? res) as ConversationDetail;
-}
-
-export async function ensureConversation(peerUserId: string, requestId?: string): Promise<{ id: string }> {
-  const res = await api(`/api/conversations/ensure`, {
-    auth: true,
-    method: 'POST',
-    body: { peerUserId, requestId },
-  });
-  return (res?.data ?? res) as { id: string };
-}
-
-/* ---------------- messages (SOCKET-FIRST) ---------------- */
-
-/** Fetch history. Uses Socket.IO `getMessages`; falls back to HTTP when needed. */
-export async function fetchMessages(conversationId: string, before?: string, limit = 50): Promise<ChatMessage[]> {
-  // if we need pagination ("before") or socket unavailable, use HTTP
-  const s = getSocket();
-  if (!s?.connected || before) {
-    return httpFetchMessages(conversationId, before, limit);
   }
 
   try {
-    const res: any = await onceWithTimeout('getMessages', 5000, () => {
-      // server expects the raw conversationId as payload
-      s.emit('getMessages', conversationId);
+    const body = await api('/api/conversations/ensure', {
+      method: 'POST',
+      auth: true,
+      body: {
+        peerUserId: String(peerUserId),
+        requestId: options.requestId ? String(options.requestId) : undefined,
+      },
     });
+    const id = body?.id ?? body?.data?.id;
+    if (id) return { id: String(id) };
+  } catch (restErr) {
+    ackError = ackError ?? restErr;
+  }
 
+  throw new Error(
+    typeof ackError === 'string'
+      ? ackError
+      : ackError?.message || 'failed_to_ensure_conversation'
+  );
+}
+
+/** List conversations for the current user (ack-based). */
+export async function listConversations(limit = 50): Promise<ConversationPreview[]> {
+  let rows: any[] | null = null;
+  try {
+    const res: any = await emitWithAck('getConversations');
     if (res?.success && Array.isArray(res?.data)) {
-      return normalizeList(res.data);
+      rows = res.data;
     }
-    // fallback if server refused
-    return httpFetchMessages(conversationId, before, limit);
-  } catch {
-    return httpFetchMessages(conversationId, before, limit);
-  }
-}
+  } catch {}
 
-/** Send a message via Socket.IO (ack); falls back to HTTP if necessary. */
-export async function sendMessage(conversationId: string, text: string): Promise<ChatMessage> {
-  const s = getSocket();
-  const payload = { conversationId, text: String(text ?? '').trim(), tempId: `tmp_${Math.random().toString(36).slice(2, 10)}` };
-
-  if (s?.connected) {
+  if (!rows) {
     try {
-      const ack: any = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('timeout')), 5000);
-        s.emit('message:send', payload, (res: any) => {
-          clearTimeout(timeout);
-          resolve(res);
-        });
-      });
-      // We rely on the realtime 'message:new' event to deliver the full message.
-      // Return a minimal object so callers can optionally clear "pending" if they want.
-      if (ack?.ok) {
-        return {
-          id: ack.id || payload.tempId,
-          conversationId,
-          from: 'me',
-          text: payload.text,
-          createdAt: new Date(ack.createdAt || Date.now()).toISOString(),
-        };
-      }
-      // if ack not ok, fall through to HTTP
-    } catch {
-      /* fall back to HTTP */
-    }
+      const rest = await api(`/api/conversations?limit=${limit}`, { method: 'GET', auth: true });
+      const raw = (rest?.items ?? rest?.data?.items ?? rest?.data ?? rest) as any;
+      if (Array.isArray(raw)) rows = raw;
+    } catch {}
   }
 
-  // Fallback to HTTP REST
-  const res = await api(`/api/conversations/${conversationId}/messages`, {
-    auth: true,
-    method: 'POST',
-    body: { text },
+  if (!rows) return [];
+
+  return rows.slice(0, limit).map((c: any) => {
+    const id = toId(c?._id ?? c?.id);
+    const last = c?.lastMessage ?? c?.last_message ?? c?.lastMessage?.content ?? c?.last_message?.content ?? null;
+    const lastCreatedAt =
+      c?.lastMessageAt ??
+      c?.last_message_at ??
+      (typeof c?.lastMessage === 'object' ? c.lastMessage?.createdAt ?? c.lastMessage?.created_at : null) ??
+      (typeof c?.last_message === 'object' ? c.last_message?.createdAt ?? c.last_message?.created_at : null);
+    return {
+      id,
+      title: String(c?.title || c?.name || 'Conversation'),
+      lastMessage: last ? String(last) : null,
+      lastMessageAt: lastCreatedAt ? new Date(lastCreatedAt).toISOString() : null,
+      unread: typeof c?.unreadCount === 'number'
+        ? c.unreadCount
+        : typeof c?.unread_count === 'number'
+          ? c.unread_count
+          : typeof c?.unread === 'number'
+            ? c.unread
+            : null,
+      requestId: c?.requestId ? String(c.requestId) : c?.request_id ? String(c.request_id) : null,
+    } as ConversationPreview;
   });
-  return normalizeMsg(res?.data ?? res);
 }
 
-export async function deleteConversation(conversationId: string): Promise<void> {
-  await api(`/api/conversations/${conversationId}`, { auth: true, method: 'DELETE' });
+/** Alias to avoid singular import bugs */
+export const listConversation = listConversations;
+
+/** Minimal conversation detail (ack-based). */
+export async function getConversation(conversationId: string): Promise<ConversationDetail> {
+  const res: any = await emitWithAck('verifyConversationParticipants', String(conversationId));
+  if (!res?.success) {
+    return { id: String(conversationId), title: 'Conversation' };
+  }
+
+  const participants: any[] = Array.isArray(res?.data?.participants) ? res.data.participants : [];
+  const me = String(res?.data?.currentUser ?? '');
+  const others = participants.filter((p: any) => String(p?._id) !== me);
+  const peer = others[0];
+
+  return {
+    id: String(conversationId),
+    title: String(peer?.name || 'Conversation'),
+    participants: participants.map((p: any) => String(p?._id)).filter(Boolean),
+    peer: peer
+      ? {
+          id: String(peer._id),
+          name: peer.name || undefined,
+          email: peer.email || undefined,
+          avatarUrl: (peer as any).avatar || null,
+        }
+      : null,
+  };
+}
+
+/* ---------------- messages ---------------- */
+
+export async function fetchMessages(
+  conversationId: string,
+  limit = 50
+): Promise<ChatMessage[]> {
+  let rows: any[] | null = null;
+  try {
+    const res: any = await emitWithAck('getMessages', String(conversationId));
+    if (res?.success && Array.isArray(res?.data)) {
+      rows = res.data;
+    }
+  } catch {}
+
+  if (!rows) {
+    try {
+      const rest = await api(`/api/conversations/${conversationId}/messages?limit=${limit}`, { method: 'GET', auth: true });
+      const data = rest?.items ?? rest?.data?.items ?? rest?.data ?? rest;
+      if (Array.isArray(data)) rows = data;
+    } catch {}
+  }
+
+  if (!rows) return [];
+
+  return rows
+    .slice(0, limit)
+    .map((raw) => normalizeMsg(raw))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+export async function sendMessage(
+  conversationId: string,
+  text: string
+): Promise<ChatMessage> {
+  const payload = {
+    conversationId: String(conversationId),
+    content: String(text ?? '').trim(),
+  };
+
+  try {
+    const ack: any = await emitWithAck('newMessage', payload, 6000);
+    if (ack?.success && ack?.data) {
+      return normalizeMsg(ack.data);
+    }
+  } catch {}
+
+  // fallback optimistic message
+  return {
+    id: `tmp_${Math.random().toString(36).slice(2, 8)}`,
+    conversationId: String(conversationId),
+    from: 'me',
+    text: payload.content,
+    createdAt: new Date().toISOString(),
+    pending: true,
+  };
 }

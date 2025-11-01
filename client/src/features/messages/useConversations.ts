@@ -1,5 +1,5 @@
 import React from 'react';
-import { listConversations, ConversationPreview } from './api';
+import { ConversationPreview, listConversations } from './api';
 
 export function useConversations() {
   const [items, setItems] = React.useState<ConversationPreview[]>([]);
@@ -10,7 +10,15 @@ export function useConversations() {
     setLoading(true);
     try {
       const data = await listConversations(100);
-      setItems(data);
+      const mapped = data.map((item: any) => ({
+        id: item.id,
+        title: item.title || item.name || 'Conversation',
+        lastMessage: item.lastMessage || item.last_message || null,
+        lastMessageAt: item.lastMessageAt || item.last_message_at || null,
+        unread: item.unread ?? item.unreadCount ?? item.unread_count ?? null,
+        requestId: item.requestId ?? item.request_id ?? null,
+      }));
+      setItems(mapped as ConversationPreview[]);
       setError(null);
     } catch (e) {
       setError(e);

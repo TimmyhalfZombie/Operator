@@ -47,7 +47,8 @@ export function decodeJwtSubFromAccess(): string | null {
 }
 
 export function getMyIdSync(): string {
-  return decodeJwtSubFromAccess() || 'me';
+  const decoded = decodeJwtSubFromAccess();
+  return decoded || 'me';
 }
 
 export function isMyMessage(from: string, myId: string): boolean {

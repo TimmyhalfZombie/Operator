@@ -9,7 +9,6 @@ import conversationsRoutes from './routes/conversations';
 import geoRoutes from './routes/geo';
 import messagesRoutes from './routes/messages';
 import operatorRoutes from './routes/operator';
-// 👇 NEW
 import ratingsRoutes from './routes/ratings';
 import routeRoutes from './routes/route';
 
@@ -32,8 +31,13 @@ const corsOptions: cors.CorsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-/* ---------- health ---------- */
-app.get('/health', (_req, res) => res.json({ ok: true }));
+/* ---------- root & health (define before routes/404) ---------- */
+app.get('/', (_req, res) => res.send('Server is running'));
+
+// Make BOTH work for device discovery and app probes
+app.get(['/api/health', '/health'], (_req, res) =>
+  res.status(200).json({ success: true, message: 'Server is healthy', ok: true })
+);
 
 /* ---------- routes ---------- */
 app.use('/api/auth', authRoutes);
@@ -44,11 +48,11 @@ app.use('/api/geo', geoRoutes);
 app.use('/api/conversations', conversationsRoutes);
 app.use('/api/messages', messagesRoutes);
 
-// 👇 NEW: ORS routing proxy
+// ORS routing proxy
 app.use('/api/route', routeRoutes);
 app.use('/api/ratings', ratingsRoutes);
 
-/* ---------- 404 & error ---------- */
+/* ---------- 404 & error (keep LAST) ---------- */
 app.use((_req, res) => res.status(404).json({ message: 'Not found' }));
 app.use(
   (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

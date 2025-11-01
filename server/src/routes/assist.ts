@@ -682,22 +682,38 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
       const participantsHash = [String(operatorId), String(clientUserId)].sort().join(':');
 
       // upsert the conversation by participantsHash; also link requestId
-      const conv = await conversationsColl.findOneAndUpdate(
-        { participantsHash },
-        {
-          $setOnInsert: {
-            members: [operatorId, clientUserId], // store as ObjectIds
-            createdAt: new Date(),
-          },
-          $set: {
-            requestId: new ObjectId(id),
-            updatedAt: new Date(),
-          },
-        },
-        { upsert: true, returnDocument: 'after' }
-      );
+      let conv = await conversationsColl.findOne({ participantsHash });
 
-      conversationId = String(conv.value?._id);
+      if (!conv) {
+        try {
+          conv = (
+            await conversationsColl.findOneAndUpdate(
+              { participantsHash },
+              {
+                $setOnInsert: {
+                  participants: [operatorId, clientUserId], // store as ObjectIds
+                  createdAt: new Date(),
+                },
+                $set: {
+                  requestId: new ObjectId(id),
+                  updatedAt: new Date(),
+                },
+              },
+              { upsert: true, returnDocument: 'after' }
+            )
+          ).value;
+        } catch (err: any) {
+          if (err?.code === 11000) {
+            conv = await conversationsColl.findOne({ participantsHash });
+          } else {
+            throw err;
+          }
+        }
+      } else if (!conv.requestId && isValidOid(id)) {
+        await conversationsColl.updateOne({ _id: conv._id }, { $set: { requestId: new ObjectId(id) } }).catch(() => void 0);
+      }
+
+      conversationId = conv ? String(conv._id) : undefined;
 
       // Ensure ConversationMeta for both sides (unread counters exist)
       const metaOps = [

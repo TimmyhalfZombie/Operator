@@ -2,15 +2,17 @@ import React from 'react';
 import { SocketContext } from '../../contexts/SocketProvider';
 import { ChatMessage, fetchMessages, sendMessage } from './api';
 
-// Normalize any server payload shape into our ChatMessage shape
+// Normalize to ChatMessage using the client app server shape
 function normalize(raw: any): ChatMessage | null {
   if (!raw) return null;
-  const id = String(raw.id ?? raw._id ?? raw.messageId ?? '');
-  const conversationId = String(raw.conversationId ?? raw.conversation?.id ?? raw.convId ?? '');
-  const from = String(raw.from ?? raw.senderId ?? raw.sender?.id ?? raw.userId ?? '');
-  const text = String(raw.text ?? raw.content ?? raw.message ?? '');
-  const createdAt = String(raw.createdAt ?? raw.timestamp ?? raw.time ?? new Date().toISOString());
-  if (!conversationId || !from || !text) return null;
+  // server broadcast: { success, data: { _id, content, createdAt, conversationId, senderId:{_id,...} } }
+  const d = raw?.data ?? raw;
+  const id = String(d?._id ?? d?.id ?? '');
+  const conversationId = String(d?.conversationId ?? '');
+  const from = String(d?.senderId?._id ?? d?.from ?? '');
+  const text = String(d?.content ?? d?.text ?? '');
+  const createdAt = String(d?.createdAt ?? new Date().toISOString());
+  if (!conversationId || !from || (!text && !id)) return null;
   return { id: id || `${conversationId}:${createdAt}:${from}`, conversationId, from, text, createdAt };
 }
 
@@ -19,18 +21,15 @@ function byTimeAsc(a: ChatMessage, b: ChatMessage) {
 }
 
 /**
- * useChat
- * @param conversationId the conversation id
- * @param meId your logged-in user id (used for optimistic "mine" bubbles)
+ * useChat (aligned to the client app server)
  */
 export function useChat(conversationId?: string, meId: string = 'me') {
   const { socket } = React.useContext(SocketContext);
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [loading, setLoading] = React.useState(false);
-  const [typing, setTyping] = React.useState<string[]>([]);
   const seenIds = React.useRef<Set<string>>(new Set());
 
-  // Initial history (socket-first via api.ts; falls back to HTTP)
+  // Initial history
   React.useEffect(() => {
     if (!conversationId) return;
     let alive = true;
@@ -39,7 +38,7 @@ export function useChat(conversationId?: string, meId: string = 'me') {
       try {
         const hist = await fetchMessages(conversationId);
         if (!alive) return;
-        const list = hist.map(normalize).filter(Boolean) as ChatMessage[];
+        const list = hist.map((m) => ({ ...m, pending: false }));
         list.forEach((m) => seenIds.current.add(String(m.id)));
         setMessages(list.sort(byTimeAsc));
       } finally {
@@ -53,58 +52,31 @@ export function useChat(conversationId?: string, meId: string = 'me') {
     };
   }, [conversationId]);
 
-  // Realtime socket wiring
+  // Realtime socket wiring (listen to client server events)
   React.useEffect(() => {
     if (!socket || !conversationId) return;
 
-    // Join common room aliases for compatibility with server
-    socket.emit('conversation:join', { conversationId });
-    socket.emit('join:conv', conversationId);
-    socket.emit('join', { room: conversationId });
-
     const upsert = (raw: any) => {
-      const m = normalize(raw?.message ?? raw);
+      // raw format is { success, data }
+      const m = normalize(raw);
       if (!m || m.conversationId !== conversationId) return;
       if (seenIds.current.has(String(m.id))) return;
 
       setMessages((prev) => {
         // replace optimistic if text+from match
-        const idx = prev.findIndex((x) => x.pending && x.text === m.text && x.from === m.from);
+        const idx = prev.findIndex((x) => x.pending && x.text === m.text && (x.from === m.from || x.from === 'me'));
         const next = prev.slice();
-        if (idx >= 0) next[idx] = { ...m };
-        else next.push(m);
+        if (idx >= 0) next[idx] = { ...m, pending: false };
+        else next.push({ ...m, pending: false });
         seenIds.current.add(String(m.id));
         return next.sort(byTimeAsc);
       });
     };
 
-    const onTyping = ({ userId, isTyping }: { userId: string; isTyping: boolean }) => {
-      setTyping((prev) => {
-        const s = new Set(prev);
-        isTyping ? s.add(userId) : s.delete(userId);
-        return Array.from(s);
-      });
-    };
-
-    socket.on('message:new', upsert);
-    socket.on('message:created', upsert);
-    socket.on('messageCreated', upsert);
-    socket.on('message:incoming', upsert);
-    socket.on('typing', onTyping);
-
-    // Optional "read" signal (server may ignore)
-    socket.emit('messages:read', { conversationId });
+    socket.on('newMessage', upsert); // broadcast from client app server
 
     return () => {
-      socket.emit('conversation:leave', { conversationId });
-      socket.emit('leave:conv', conversationId);
-      socket.emit('leave', { room: conversationId });
-
-      socket.off('message:new', upsert);
-      socket.off('message:created', upsert);
-      socket.off('messageCreated', upsert);
-      socket.off('message:incoming', upsert);
-      socket.off('typing', onTyping);
+      socket.off('newMessage', upsert);
     };
   }, [socket, conversationId]);
 
@@ -114,44 +86,14 @@ export function useChat(conversationId?: string, meId: string = 'me') {
       if (!t) return;
 
       // optimistic bubble
-      const tempId = `tmp_${Math.random().toString(36).slice(2, 10)}`;
-      const optimistic: ChatMessage = {
-        id: tempId,
-        tempId: tempId as any,
-        conversationId: conversationId ?? 'local',
-        from: meId,
-        text: t,
-        createdAt: new Date().toISOString(),
-        pending: true,
-      } as any;
+      const optimistic = await sendMessage(conversationId!, t);
       setMessages((prev) => [...prev, optimistic].sort(byTimeAsc));
-
-      if (conversationId) {
-        try {
-          // socket-first send; UI will be reconciled by 'message:new' event
-          await sendMessage(conversationId, t);
-        } catch {
-          // mark as failed but keep visible
-          setMessages((prev) => {
-            const idx = prev.findIndex((m) => m.id === tempId);
-            if (idx < 0) return prev;
-            const next = prev.slice();
-            next[idx] = { ...(prev[idx] as any), pending: false, failed: true };
-            return next;
-          });
-        }
-      }
     },
-    [conversationId, meId]
+    [conversationId]
   );
 
-  const setIsTyping = React.useCallback(
-    (flag: boolean) => {
-      if (!socket || !conversationId) return;
-      socket.emit('typing', { conversationId, isTyping: !!flag });
-    },
-    [socket, conversationId]
-  );
+  // Typing indicators are not part of the client app server contract; no-ops here.
+  const setIsTyping = React.useCallback((_flag: boolean) => {}, []);
 
-  return { messages, loading, typing, send, setIsTyping };
+  return { messages, loading, typing: [], send, setIsTyping };
 }

@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { deleteConversation } from '../features/messages/api';
@@ -26,6 +26,12 @@ function timeAgo(iso?: string | null) {
 
 export default function MessagesScreen() {
   const { items, loading, error, reload } = useConversations();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      reload();
+    }, [reload])
+  );
 
   const handleConversationPress = (item: any) => {
     router.push({ pathname: '/chat/[id]', params: { id: item.id } });
@@ -101,7 +107,7 @@ export default function MessagesScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
-  header: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
+  header: { paddingHorizontal: 16, paddingTop: 40, paddingBottom: 8 },
   row: { backgroundColor: CARD, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center' },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2d2d2d', marginRight: 12 },
   name: { color: TEXT, fontSize: 16, fontWeight: '700', flex: 1 },

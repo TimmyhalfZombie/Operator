@@ -1,12 +1,12 @@
 import type { Server as HTTPServer } from 'http';
-import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { Types } from 'mongoose';
-import { Message } from './models/message';
+import { Server, Socket } from 'socket.io';
+import { getAuthDb, getCustomerDb } from './db/connect';
+import { sendPushToUserIds } from './lib/expoPush'; // optional; used for chat push
 import { Conversation } from './models/conversation';
 import { ConversationMeta } from './models/conversationMeta';
-import { getCustomerDb } from './db/connect';
-import { sendPushToUserIds } from './lib/expoPush'; // optional; used for chat push
+import { Message } from './models/message';
 
 type JwtUser = { id: string };
 
@@ -106,6 +106,157 @@ async function usersInRoom(io: Server, room: string): Promise<Set<string>> {
   return ids;
 }
 
+function toObjectId(id?: string | Types.ObjectId | null): Types.ObjectId | null {
+  if (!id) return null;
+  if (id instanceof Types.ObjectId) return id;
+  return Types.ObjectId.isValid(id) ? new Types.ObjectId(id) : null;
+}
+
+function pickUserName(user: any): string {
+  return (
+    user?.name ||
+    user?.username ||
+    user?.displayName ||
+    user?.email ||
+    'User'
+  );
+}
+
+function pickUserAvatar(user: any): string | null {
+  return (
+    user?.avatar ||
+    user?.avatarUrl ||
+    user?.photoURL ||
+    user?.profilePicture ||
+    null
+  );
+}
+
+async function fetchUserSummaries(ids: string[]): Promise<Map<string, any>> {
+  const unique = Array.from(new Set(ids.filter(Boolean).map(String)));
+  const objectIds = unique
+    .map((id: string) => toObjectId(id))
+    .filter((oid): oid is Types.ObjectId => !!oid);
+
+  if (!objectIds.length) return new Map<string, any>();
+
+  try {
+    const authDb = getAuthDb();
+    const docs = await authDb
+      .collection('users')
+      .find({ _id: { $in: objectIds } })
+      .project({ name: 1, username: 1, email: 1, avatar: 1, avatarUrl: 1, photoURL: 1 })
+      .toArray();
+
+    const map = new Map<string, any>();
+    docs.forEach((doc: any) => {
+      map.set(String(doc._id), doc);
+    });
+    return map;
+  } catch (err) {
+    console.warn('[socket] fetchUserSummaries failed:', (err as Error).message);
+    return new Map<string, any>();
+  }
+}
+
+function buildMessagePayload(doc: any, usersMap?: Map<string, any>) {
+  const obj = doc?.toObject ? doc.toObject() : doc;
+  const senderId = String(obj?.senderId ?? obj?.sender?._id ?? '');
+  const user = usersMap?.get(senderId);
+
+  return {
+    _id: String(obj?._id ?? ''),
+    conversationId: String(obj?.conversationId ?? ''),
+    content: obj?.content ?? '',
+    attachment: obj?.attachment ?? null,
+    createdAt: new Date(obj?.createdAt ?? Date.now()).toISOString(),
+    senderId: {
+      _id: senderId,
+      name: pickUserName(user),
+      avatar: pickUserAvatar(user),
+      email: user?.email || undefined,
+    },
+  };
+}
+
+async function buildConversationPayload(convDoc: any, currentUserId: string, options: { lastMessage?: any } = {}) {
+  const conv = convDoc?.toObject ? convDoc.toObject() : convDoc;
+  const convId = String(conv?._id ?? '');
+  const memberIds: string[] = Array.isArray(conv?.participants) ? conv.participants.map((m: any) => String(m)) : [];
+  const usersMap = await fetchUserSummaries(memberIds);
+
+  const participants: Array<{ _id: string; name: string; avatar: string | null; email?: string }> = memberIds.map((id: string) => {
+    const user = usersMap.get(id);
+    return {
+      _id: id,
+      name: pickUserName(user),
+      avatar: pickUserAvatar(user),
+      email: user?.email || undefined,
+    };
+  });
+
+  const friend = participants.find((p) => p._id !== String(currentUserId));
+  const lastMessageSource = options.lastMessage || (await Message.findOne({ conversationId: conv._id }).sort({ createdAt: -1 }).lean().catch(() => null));
+  const lastMessage = lastMessageSource
+    ? buildMessagePayload(lastMessageSource, usersMap)
+    : conv?.lastMessage
+    ? {
+        _id: `legacy_${convId}`,
+        conversationId: convId,
+        content: conv.lastMessage,
+        attachment: null,
+        createdAt: new Date(conv.lastMessageAt ?? conv.updatedAt ?? conv.createdAt ?? Date.now()).toISOString(),
+        senderId: {
+          _id: friend?._id ?? String(currentUserId),
+          name: friend?.name ?? pickUserName(usersMap.get(String(currentUserId))),
+          avatar: friend?.avatar ?? pickUserAvatar(usersMap.get(String(currentUserId))),
+          email: friend?.email,
+        },
+      }
+    : null;
+
+  const userIdObj = toObjectId(currentUserId);
+  const metaFilter: any = { conversationId: conv._id };
+  if (userIdObj) metaFilter.userId = userIdObj;
+  else metaFilter.userId = currentUserId;
+
+  const meta = (await ConversationMeta.findOne(metaFilter).lean().catch(() => null)) as any;
+
+  return {
+    _id: convId,
+    type: 'direct',
+    name: conv?.title || friend?.name || 'Conversation',
+    avatar: conv?.avatar || friend?.avatar || null,
+    participants,
+    lastMessage,
+    createdAt: new Date(conv?.createdAt ?? Date.now()).toISOString(),
+    updatedAt: new Date(conv?.updatedAt ?? conv?.createdAt ?? Date.now()).toISOString(),
+    unreadCount: typeof meta?.unread === 'number' ? meta.unread : 0,
+  };
+}
+
+function emitToUser(io: Server, userId: string, event: string, payload: any) {
+  io.sockets.sockets.forEach((client) => {
+    const clientUser = (client as any).user as JwtUser | undefined;
+    if (clientUser?.id === userId) {
+      client.emit(event, payload);
+    }
+  });
+}
+
+async function broadcastConversationUpdate(io: Server, convId: Types.ObjectId | string, options: { lastMessage?: any } = {}) {
+  const conv = (await Conversation.findById(convId).lean()) as any;
+  if (!conv) return;
+  const participantIds: string[] = Array.isArray(conv.participants) ? conv.participants.map((m: any) => String(m)) : [];
+
+  await Promise.all(
+    participantIds.map(async (uid: string) => {
+      const data = await buildConversationPayload(conv, uid, options);
+      emitToUser(io, uid, 'conversationUpdated', { success: true, data });
+    })
+  );
+}
+
 export function initSocket(httpServer: HTTPServer) {
   const io = new Server(httpServer, {
     path: '/socket.io',
@@ -143,12 +294,23 @@ export function initSocket(httpServer: HTTPServer) {
     try {
       let convIds: string[] = [];
       if (Types.ObjectId.isValid(me.id)) {
-        const mine = await Conversation.find({ members: new Types.ObjectId(me.id) }, { _id: 1 }).lean();
+        const mine = await Conversation.find({ participants: new Types.ObjectId(me.id) }, { _id: 1 }).lean();
         convIds = mine.map((c: any) => String(c._id));
       } else {
         const agg = await Conversation.aggregate([
-          { $addFields: { membersStr: { $map: { input: '$members', as: 'm', in: { $toString: '$$m' } } } } },
-          { $match: { membersStr: me.id } },
+          {
+            $addFields: {
+              participants: {
+                $cond: [
+                  { $gt: [{ $size: { $ifNull: ['$participants', []] } }, 0] },
+                  '$participants',
+                  '$members',
+                ],
+              },
+            },
+          },
+          { $addFields: { participantsStr: { $map: { input: '$participants', as: 'm', in: { $toString: '$$m' } } } } },
+          { $match: { participantsStr: me.id } },
           { $project: { _id: 1 } },
         ]);
         convIds = agg.map((c: any) => String(c._id));
@@ -175,8 +337,41 @@ export function initSocket(httpServer: HTTPServer) {
       socket.to(convRoom(conversationId)).emit('typing', { userId: me.id, isTyping: !!isTyping });
     });
 
-    // ---- conversation creation (unchanged) ----
-    socket.on('newConversation', async (payload: any) => {
+    socket.on('getConversations', async (payloadOrAck?: any, maybeAck?: (res: any) => void) => {
+      const ack = typeof payloadOrAck === 'function'
+        ? (payloadOrAck as (res: any) => void)
+        : typeof maybeAck === 'function'
+          ? maybeAck
+          : undefined;
+      try {
+        const query = Types.ObjectId.isValid(me.id)
+          ? {
+              $or: [
+                { participants: new Types.ObjectId(me.id) },
+                { members: new Types.ObjectId(me.id) },
+              ],
+            }
+          : {
+              $or: [
+                { participants: me.id },
+                { members: me.id },
+              ],
+            };
+
+        const convs = await Conversation.find(query).sort({ updatedAt: -1 }).lean();
+        const data = await Promise.all(convs.map((conv) => buildConversationPayload(conv, me.id)));
+
+        const response = { success: true, data };
+        ack ? ack(response) : socket.emit('getConversations', response);
+      } catch (err: any) {
+        console.error('[socket] getConversations failed:', err?.message || err);
+        const response = { success: false, msg: 'Failed to fetch conversations' };
+        ack ? ack(response) : socket.emit('getConversations', response);
+      }
+    });
+
+    // ---- conversation creation (aligned with client app) ----
+    socket.on('newConversation', async (payload: any, ack?: (res: any) => void) => {
       try {
         const type = (payload?.type || 'direct').toString();
         let participants: string[] = Array.isArray(payload?.participants) ? payload.participants.map(String) : [];
@@ -184,76 +379,190 @@ export function initSocket(httpServer: HTTPServer) {
 
         if (!participants.includes(me.id)) participants.push(me.id);
         if (participants.length < 2) {
-          return socket.emit('newConversation', { success: false, msg: 'Not enough participants' });
+          socket.emit('newConversation', { success: false, msg: 'Not enough participants' });
+          return;
         }
 
-        const memberOids = participants.map((id) => new Types.ObjectId(id));
-        let conv: any;
+        const participantsHash = participants.slice().sort().join(':');
+        const memberOids = participants
+          .map((id) => toObjectId(id))
+          .filter((oid): oid is Types.ObjectId => !!oid);
 
-        if (type === 'direct' && participants.length === 2) {
-          conv = await Conversation.findOne({ members: { $all: memberOids, $size: 2 } });
-          if (!conv) {
+        let conv = await Conversation.findOne({ participantsHash });
+        const existing = !!conv;
+
+        if (!conv) {
+          try {
             conv = await Conversation.create({
-              members: memberOids.sort(),
+              participants: memberOids,
               title: payload?.name || undefined,
               lastMessageAt: new Date(),
             });
+          } catch (createErr: any) {
+            if ((createErr as any)?.code === 11000) {
+              conv = await Conversation.findOne({ participantsHash });
+            }
+            if (!conv) throw createErr;
           }
-        } else {
-          conv = await Conversation.create({
-            members: memberOids.sort(),
-            title: payload?.name || undefined,
-            lastMessageAt: new Date(),
-          });
         }
 
-        socket.join(convRoom(String(conv._id)));
-        socket.emit('newConversation', { success: true, data: conv });
+        // ensure meta rows exist (unread = 0)
+        await Promise.all(
+          memberOids.map((oid) =>
+            ConversationMeta.updateOne(
+              { conversationId: conv!._id, userId: oid },
+              { $setOnInsert: { unread: 0 }, $set: { unread: 0 } },
+              { upsert: true }
+            ).catch(() => undefined)
+          )
+        );
+
+        socket.join(convRoom(String(conv!._id)));
+
+        const freshConv = await Conversation.findById(conv!._id).lean();
+        if (!freshConv) {
+          const response = { success: false, msg: 'Failed to load conversation' };
+          ack ? ack(response) : socket.emit('newConversation', response);
+          return;
+        }
+
+        const mine = await buildConversationPayload(freshConv, me.id);
+        const selfPayload = { success: true, data: { ...mine, isNew: !existing } };
+        ack ? ack(selfPayload) : socket.emit('newConversation', selfPayload);
+
+        const otherIds = participants.filter((id) => id !== me.id);
+        await Promise.all(
+          otherIds.map(async (uid) => {
+            const data = await buildConversationPayload(freshConv, uid);
+            emitToUser(io, uid, 'newConversation', { success: true, data: { ...data, isNew: !existing } });
+          })
+        );
+
+        await broadcastConversationUpdate(io, conv!._id);
       } catch (err: any) {
         console.error('[socket] newConversation failed:', err?.message || err);
-        socket.emit('newConversation', { success: false, msg: 'Failed to create conversation' });
+        const response = { success: false, msg: 'Failed to create conversation' };
+        ack ? ack(response) : socket.emit('newConversation', response);
+      }
+    });
+
+    socket.on('deleteConversation', async (conversationId: string) => {
+      try {
+        if (!conversationId || !Types.ObjectId.isValid(conversationId)) {
+          socket.emit('deleteConversation', { success: false, msg: 'Invalid conversation id' });
+          return;
+        }
+
+        const conv = await Conversation.findById(conversationId);
+        if (!conv) {
+          socket.emit('deleteConversation', { success: false, msg: 'Conversation not found' });
+          return;
+        }
+
+        const participantIds = Array.isArray(conv.participants) ? conv.participants.map((m: any) => String(m)) : [];
+        if (!participantIds.includes(me.id)) {
+          socket.emit('deleteConversation', { success: false, msg: 'Forbidden' });
+          return;
+        }
+
+        await Message.deleteMany({ conversationId: conv._id });
+        await ConversationMeta.deleteMany({ conversationId: conv._id });
+        await Conversation.deleteOne({ _id: conv._id });
+
+        const payload = { success: true, conversationId: String(conv._id) };
+        participantIds.forEach((uid: string) => emitToUser(io, uid, 'conversationDeleted', payload));
+        socket.emit('deleteConversation', { success: true });
+      } catch (err: any) {
+        console.error('[socket] deleteConversation failed:', err?.message || err);
+        socket.emit('deleteConversation', { success: false, msg: 'Failed to delete conversation' });
+      }
+    });
+
+    socket.on('markAsRead', async (conversationId: string) => {
+      try {
+        if (!conversationId || !Types.ObjectId.isValid(conversationId)) {
+          socket.emit('markAsRead', { success: false, msg: 'Invalid conversation id' });
+          return;
+        }
+
+        const conv = (await Conversation.findById(conversationId).lean()) as any;
+        if (!conv) {
+          socket.emit('markAsRead', { success: false, msg: 'Conversation not found' });
+          return;
+        }
+
+        const userIdObj = toObjectId(me.id);
+        const filter: any = { conversationId: conv._id };
+        if (userIdObj) filter.userId = userIdObj;
+        else filter.userId = me.id;
+
+        await ConversationMeta.updateOne(filter, { $set: { unread: 0, lastReadAt: new Date() } }, { upsert: true });
+        socket.emit('markAsRead', { success: true });
+
+        const refreshed = (await Conversation.findById(conversationId).lean()) as any;
+        if (refreshed) {
+          const data = await buildConversationPayload(refreshed, me.id);
+          data.unreadCount = 0;
+          socket.emit('conversationUpdated', { success: true, data });
+        }
+      } catch (err: any) {
+        console.error('[socket] markAsRead failed:', err?.message || err);
+        socket.emit('markAsRead', { success: false, msg: 'Failed to mark as read' });
       }
     });
 
     // ---- message history (unchanged) ----
-    socket.on('getMessages', async (conversationId: string) => {
+    socket.on('getMessages', async (conversationId: string, ack?: (res: any) => void) => {
       try {
         if (!conversationId || !Types.ObjectId.isValid(conversationId)) {
-          return socket.emit('getMessages', { success: false, msg: 'Invalid conversation id' });
+          const payload = { success: false, msg: 'Invalid conversation id' };
+          ack ? ack(payload) : socket.emit('getMessages', payload);
+          return;
         }
         const conv = await Conversation.findById(conversationId);
-        if (!conv) return socket.emit('getMessages', { success: false, msg: 'Conversation not found' });
-        if (!conv.members.map(String).includes(me.id)) {
-          return socket.emit('getMessages', { success: false, msg: 'Forbidden' });
+        if (!conv) {
+          const payload = { success: false, msg: 'Conversation not found' };
+          ack ? ack(payload) : socket.emit('getMessages', payload);
+          return;
+        }
+        if (!conv.participants.map(String).includes(me.id)) {
+          const payload = { success: false, msg: 'Forbidden' };
+          ack ? ack(payload) : socket.emit('getMessages', payload);
+          return;
         }
 
         const docs = await Message.find({ conversationId: conv._id }).sort({ createdAt: -1 }).limit(200).lean();
+        const senderIds = docs.map((m: any) => String(m.senderId));
+        const userMap = await fetchUserSummaries(senderIds);
 
-        const mapped = docs.map((m: any) => ({
-          _id: String(m._id),
-          content: m.content,
-          attachment: m.attachment ?? null,
-          createdAt: (m.createdAt ?? new Date()).toISOString(),
-          senderId: { _id: String(m.senderId) },
-          conversationId: String(m.conversationId),
-        }));
+        const mapped = docs.map((m: any) => buildMessagePayload(m, userMap));
 
-        socket.emit('getMessages', { success: true, data: mapped });
+        const payload = { success: true, data: mapped };
+        ack ? ack(payload) : socket.emit('getMessages', payload);
       } catch (err: any) {
         console.error('[socket] getMessages failed:', err?.message || err);
-        socket.emit('getMessages', { success: false, msg: 'Failed to fetch messages' });
+        const payload = { success: false, msg: 'Failed to fetch messages' };
+        ack ? ack(payload) : socket.emit('getMessages', payload);
       }
     });
 
     // ---- send message (unchanged; also triggers remote push if you kept expoPush.ts) ----
-    async function createAndBroadcastMessage(p: { conversationId?: string; text?: string; tempId?: string }) {
+    async function createAndBroadcastMessage(p: {
+      conversationId?: string;
+      text?: string;
+      content?: string;
+      attachment?: string | null;
+      tempId?: string;
+    }) {
       const conversationId = String(p?.conversationId || '');
-      const text = String(p?.text || '').trim();
+      const rawContent = p?.text ?? p?.content;
+      const text = typeof rawContent === 'string' ? rawContent.trim() : '';
+      const attachment = p?.attachment ? String(p.attachment) : null;
       const tempId = p?.tempId;
 
-      if (!conversationId || !text) {
-        if (process.env.NODE_ENV !== 'production') console.warn('[socket] missing conversationId/text', p);
-        return;
+      if (!conversationId || (!text && !attachment)) {
+        if (process.env.NODE_ENV !== 'production') console.warn('[socket] missing conversationId/content', p);
+        return null;
       }
 
       let conv: any = null;
@@ -264,7 +573,7 @@ export function initSocket(httpServer: HTTPServer) {
         throw e;
       }
       if (!conv) throw new Error('conversation_not_found');
-      const isMember = conv.members.map(String).includes(me.id);
+      const isMember = conv.participants.map(String).includes(me.id);
       if (!isMember) throw new Error('forbidden');
 
       const stamp = new Date();
@@ -276,6 +585,7 @@ export function initSocket(httpServer: HTTPServer) {
           conversationId: conv._id,
           senderId: sender,
           content: text,
+          attachment,
           createdAt: stamp,
         });
       } catch (e) {
@@ -285,65 +595,89 @@ export function initSocket(httpServer: HTTPServer) {
           conversationId: conv._id,
           senderId: Types.ObjectId.isValid(me.id) ? new Types.ObjectId(me.id) : me.id,
           content: text,
+          attachment,
           createdAt: stamp,
         });
-        msgDoc = { _id: ins.insertedId, conversationId: conv._id, senderId: me.id, content: text, createdAt: stamp };
+        msgDoc = { _id: ins.insertedId, conversationId: conv._id, senderId: me.id, content: text, attachment, createdAt: stamp };
       }
 
       await Conversation.findByIdAndUpdate(conv._id, {
-        lastMessage: text,
+        lastMessage: attachment && !text ? '[attachment]' : text,
         lastMessageAt: stamp,
       }).catch((e) => console.warn('[socket] update conversation preview failed:', (e as Error).message));
 
-      const others = conv.members.map(String).filter((u) => u !== me.id);
+      const others = conv.participants.map((member: any) => String(member)).filter((memberId: string) => memberId !== me.id);
 
       await Promise.all(
-        others.map(async (uid) => {
+        others.map(async (uid: string) => {
           try {
-            await ConversationMeta.updateOne(
-              { conversationId: conv._id, userId: new Types.ObjectId(uid) },
-              { $inc: { unread: 1 } },
-              { upsert: true }
-            );
+            const oid = toObjectId(uid);
+            if (oid) {
+              await ConversationMeta.updateOne(
+                { conversationId: conv._id, userId: oid },
+                { $inc: { unread: 1 } },
+                { upsert: true }
+              );
+            }
           } catch {}
         })
       );
 
-      const payload = {
-        id: String(msgDoc._id),
-        conversationId: String(conv._id),
-        from: String(Types.ObjectId.isValid(me.id) ? me.id : msgDoc.senderId),
-        text,
-        createdAt: (msgDoc.createdAt ?? stamp).toISOString(),
-      };
+      const userMap = await fetchUserSummaries([me.id, ...others]);
+      const messagePayload = buildMessagePayload({ ...(msgDoc?.toObject ? msgDoc.toObject() : msgDoc), conversationId: conv._id }, userMap);
 
-      io.to(convRoom(payload.conversationId)).emit('message:new', payload);
-      io.to(convRoom(payload.conversationId)).emit('message:created', { message: payload, conversationId: payload.conversationId });
+      io.to(convRoom(messagePayload.conversationId)).emit('newMessage', { success: true, data: messagePayload });
+      io.to(convRoom(messagePayload.conversationId)).emit('message:new', {
+        id: messagePayload._id,
+        conversationId: messagePayload.conversationId,
+        from: messagePayload.senderId._id,
+        text: messagePayload.content,
+        attachment: messagePayload.attachment,
+        createdAt: messagePayload.createdAt,
+      });
 
-      if (tempId) socket.emit('message:delivered', { tempId, id: payload.id, createdAt: payload.createdAt });
+      if (tempId) socket.emit('message:delivered', { tempId, id: messagePayload._id, createdAt: messagePayload.createdAt });
+
+      emitToUser(io, me.id, 'messageDelivered', {
+        success: true,
+        conversationId: messagePayload.conversationId,
+        deliveredTo: others.map((uid: string) => pickUserName(userMap.get(uid))).filter(Boolean),
+      });
 
       // Optional: remote push for recipients not in room
       try {
-        const inRoom = await usersInRoom(io, convRoom(payload.conversationId));
-        const targets = others.filter((uid) => !inRoom.has(uid));
+        const inRoom = await usersInRoom(io, convRoom(messagePayload.conversationId));
+        const targets = others.filter((uid: string) => !inRoom.has(uid));
         if (targets.length) {
           await sendPushToUserIds(targets, {
             title: 'New message',
-            body: text.length > 120 ? text.slice(0, 117) + '…' : text,
-            data: { type: 'chat', conversationId: payload.conversationId },
+            body:
+              attachment && !text
+                ? 'Sent a photo'
+                : text.length > 120
+                  ? text.slice(0, 117) + '…'
+                  : text || 'New message',
+            data: { type: 'chat', conversationId: messagePayload.conversationId },
           });
         }
       } catch (e) {
         console.warn('[push] chat push failed:', (e as Error).message);
       }
 
-      return payload;
+      await broadcastConversationUpdate(io, conv._id, { lastMessage: msgDoc });
+
+      return messagePayload;
     }
 
     socket.on('message:send', async (p: any, ack?: (res: any) => void) => {
       try {
-        const m = await createAndBroadcastMessage({ conversationId: p?.conversationId, text: p?.text ?? p?.content, tempId: p?.tempId });
-        ack && ack({ ok: true, id: m?.id, createdAt: m?.createdAt });
+        const m = await createAndBroadcastMessage({
+          conversationId: p?.conversationId,
+          text: p?.text ?? p?.content,
+          attachment: p?.attachment,
+          tempId: p?.tempId,
+        });
+        ack && ack({ ok: true, success: true, data: m, id: m?._id, createdAt: m?.createdAt });
       } catch (e: any) {
         ack && ack({ ok: false, error: e?.message || 'send_failed' });
       }
@@ -351,8 +685,13 @@ export function initSocket(httpServer: HTTPServer) {
 
     socket.on('newMessage', async (p: any, ack?: (res: any) => void) => {
       try {
-        const m = await createAndBroadcastMessage({ conversationId: p?.conversationId, text: p?.text ?? p?.content, tempId: p?.tempId });
-        ack && ack({ ok: true, id: m?.id, createdAt: m?.createdAt });
+        const m = await createAndBroadcastMessage({
+          conversationId: p?.conversationId,
+          text: p?.text ?? p?.content,
+          attachment: p?.attachment,
+          tempId: p?.tempId,
+        });
+        ack && ack({ ok: true, success: true, data: m, id: m?._id, createdAt: m?.createdAt });
       } catch (e: any) {
         ack && ack({ ok: false, error: e?.message || 'send_failed' });
       }

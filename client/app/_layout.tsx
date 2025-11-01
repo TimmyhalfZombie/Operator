@@ -19,8 +19,8 @@ export default function RootLayout() {
     'Inter-Regular': require('../assets/fonts/static/Inter_18pt-Regular.ttf'),
   });
 
-  const [tokensReady, setTokensReady] = useState(false);
-  
+  const [authReady, setAuthReady] = useState(false);
+
   // Enable immersive mode
   useImmersiveMode();
 
@@ -28,9 +28,11 @@ export default function RootLayout() {
   useEffect(() => {
     (async () => {
       try {
-        await tokens.loadFromStorage();
+        await tokens.initTokens();
+        const uid = await tokens.getUserIdAsync();
+        console.log('[auth] ready; userId =', uid);
       } finally {
-        setTokensReady(true);
+        setAuthReady(true);
       }
     })();
   }, []);
@@ -48,7 +50,7 @@ export default function RootLayout() {
     return () => unsub();
   }, []);
 
-  const ready = fontsLoaded && tokensReady;
+  const ready = fontsLoaded && authReady;
 
   const onLayoutRootView = useCallback(async () => {
     if (ready) {

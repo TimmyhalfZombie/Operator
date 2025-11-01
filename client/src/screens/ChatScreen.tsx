@@ -23,13 +23,13 @@ import ImageViewing from 'react-native-image-viewing';
 
 import { tokens } from '../auth/tokenStore';
 import { SocketContext } from '../contexts/SocketProvider';
-import {
-  fetchMessages,
-  getConversation
-} from '../features/messages/api';
+import { fetchMessages } from '../features/messages/api';
 import { ensureConversationId } from '../features/messages/ensureConvId';
+import { fetchMe } from '../lib/api';
 import {
   LocalMessage,
+  getMyIdSync,
+  isMyMessage,
   loadAttachmentsMap,
   openAttachmentPicker,
   pickFromCamera,
@@ -60,8 +60,8 @@ export default function ChatScreen() {
   const { socket } = React.useContext(SocketContext);
 
   const [conversationId, setConversationId] = React.useState<string>(initialId);
-  const [meId, setMeId] = React.useState<string | null>(null);
   const [title, setTitle] = React.useState<string>('Chat');
+  const [myId, setMyId] = React.useState<string>(getMyIdSync() || 'me');
   const [loading, setLoading] = React.useState(true);
 
   // NEWEST first (DESC) for inverted FlatList
@@ -74,13 +74,35 @@ export default function ChatScreen() {
   // Lightbox (zoomable) state
   const [viewerUri, setViewerUri] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const meInfo = await fetchMe();
+        if (!cancelled && meInfo?.id) {
+          setMyId(String(meInfo.id));
+        }
+      } catch {}
+      try {
+        if ((tokens as any)?.waitUntilReady) {
+          await (tokens as any).waitUntilReady();
+        }
+        const asyncId = await tokens.getUserIdAsync?.();
+        if (!cancelled && asyncId) {
+          setMyId(String(asyncId));
+        }
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // 0) Resolve/ensure a real conversation id if we arrived as "new"
   React.useEffect(() => {
     let cancelled = false;
-
     (async () => {
       const rawId = initialId?.trim();
-      // If the id is missing/placeholder, resolve it using peerUserId or requestId
       if (!rawId || rawId === 'new') {
         const resolved = await ensureConversationId(undefined, {
           peerUserId: typeof params?.peerUserId === 'string' ? params.peerUserId : undefined,
@@ -88,7 +110,6 @@ export default function ChatScreen() {
         });
         if (!cancelled && resolved) {
           setConversationId(resolved);
-          // Replace the route param silently so any future navigations reuse the real id
           try {
             router.replace({ pathname: '/(tabs)/chat/[id]', params: { id: resolved } });
           } catch {}
@@ -97,42 +118,29 @@ export default function ChatScreen() {
         setConversationId(rawId);
       }
     })();
-
     return () => { cancelled = true; };
-    // only on first mount or when incoming params change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialId, params?.peerUserId, params?.requestId]);
 
-  // 1) Load current user id from JWT
+  // 1) Derive title via socket: verifyConversationParticipants → pick the "other" name
   React.useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const uid = await tokens.getUserIdAsync();
-      if (mounted) setMeId(uid ?? null);
-    })();
-    return () => { mounted = false; };
-  }, []);
-
-  // 2) Load conversation meta (for title/peer) once we have a real id
-  React.useEffect(() => {
-    if (!conversationId || conversationId === 'new') return;
-    let mounted = true;
-    (async () => {
+    if (!socket || !conversationId || conversationId === 'new') return;
+    const onReply = (res: any) => {
+      if (!res?.success) return;
       try {
-        const conv = await getConversation(conversationId);
-        if (mounted) {
-          const t =
-            conv?.peer?.name ||
-            conv?.peer?.username ||
-            conv?.peer?.phone ||
-            conv?.title ||
-            'Chat';
-          setTitle(t);
-        }
+        const me = String((socket as any).user?.id ?? '');
+        const others = (res.data?.participants || []).filter((p: any) => String(p._id) !== me);
+        const peer = others[0];
+        const t = peer?.name || 'Conversation';
+        setTitle(t);
       } catch {}
-    })();
-    return () => { mounted = false; };
-  }, [conversationId]);
+    };
+    socket.once('verifyConversationParticipants', onReply);
+    socket.emit('verifyConversationParticipants', conversationId);
+    return () => {
+      socket.off('verifyConversationParticipants', onReply);
+    };
+  }, [socket, conversationId]);
 
   // Android hardware back: go to Messages tab
   React.useEffect(() => {
@@ -143,50 +151,47 @@ export default function ChatScreen() {
     return () => sub.remove();
   }, [router]);
 
-  // 3) Real-time socket listeners for database changes (after id exists)
+  // 2) Real-time: listen for newMessage broadcasts (server sends newest first)
   React.useEffect(() => {
     if (!socket || !conversationId || conversationId === 'new') return;
 
-    const handleConversationDeleted = (data: { conversationId: string }) => {
-      if (data.conversationId === conversationId) {
-        router.replace('/(tabs)/messages');
+    const handleNewMessage = (evt: any) => {
+      if (!evt?.success || !evt?.data) return;
+      const m = evt.data;
+      if (String(m?.conversationId) !== String(conversationId)) return;
+
+      const fromMe = isMyMessage(String(m?.senderId?._id || m?.senderId), myId || 'me');
+      if (fromMe) {
+        return;
       }
+
+      const createdAt = new Date(m.createdAt ?? Date.now()).toISOString();
+      const local: LocalMessage = {
+        id: String(m._id),
+        conversationId: String(m.conversationId),
+        from: String(m.senderId?._id || m.senderId),
+        text: String(m.content ?? ''),
+        imageUri: attachMap[String(m._id)] || (m.attachment ? String(m.attachment) : null),
+        createdAt,
+      };
+
+      setMessages((prev) => {
+        const exists = prev.some((x) => x.id === local.id);
+        if (exists) {
+          return prev.map((x) => (x.id === local.id ? { ...local, pending: false, failed: false } : x));
+        }
+
+        return [local, ...prev].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+      });
     };
 
-    const handleMessageDeleted = (data: { messageId: string; conversationId: string }) => {
-      if (data.conversationId === conversationId) {
-        setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
-      }
-    };
-
-    const handleNewMessage = (data: { message: any; conversationId: string }) => {
-      if (data.conversationId === conversationId) {
-        const newMessage: LocalMessage = {
-          ...data.message,
-          imageUri: attachMap[data.message.id] || null,
-        };
-        setMessages(prev => {
-          const exists = prev.some(msg => msg.id === newMessage.id);
-          if (exists) return prev;
-          return [newMessage, ...prev].sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-        });
-      }
-    };
-
-    socket.on('conversation:deleted', handleConversationDeleted);
-    socket.on('message:deleted', handleMessageDeleted);
-    socket.on('message:created', handleNewMessage);
-
+    socket.on('newMessage', handleNewMessage);
     return () => {
-      socket.off('conversation:deleted', handleConversationDeleted);
-      socket.off('message:deleted', handleMessageDeleted);
-      socket.off('message:created', handleNewMessage);
+      socket.off('newMessage', handleNewMessage);
     };
-  }, [socket, conversationId, router, attachMap]);
+  }, [socket, conversationId, attachMap]);
 
-  // 4) Load attachments map first, then messages (so we can enrich with imageUri on first render)
+  // 3) Load attachments first, then messages
   React.useEffect(() => {
     if (!conversationId || conversationId === 'new') return;
     let mounted = true;
@@ -200,10 +205,7 @@ export default function ChatScreen() {
         const items = await fetchMessages(conversationId);
         if (!mounted) return;
 
-        const sortedDesc = [...items].sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-
+        const sortedDesc = [...items].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
         const enriched: LocalMessage[] = sortedDesc.map((m) => ({
           ...m,
           imageUri: map[m.id] ?? null,
@@ -218,64 +220,68 @@ export default function ChatScreen() {
 
   async function handleSend() {
     const text = input.trim();
-    if (!text || !meId) return;
-    if (!conversationId || conversationId === 'new') {
-      // no valid conversation id yet
-      return;
-    }
-
+    if (!text || !conversationId || conversationId === 'new') return;
     setInput('');
-
     await sendTextMessage(
       conversationId,
-      meId,
+      myId || 'me',
       text,
-      (msg) => setMessages((prev) => [msg, ...prev]),
+      (msg) => setMessages((prev) => [
+        { ...msg, from: myId || 'me' },
+        ...prev,
+      ]),
       (tmpId, saved) => {
         setMessages((prev) => {
           const idx = prev.findIndex((m) => m.id === tmpId);
+          const normalized = {
+            ...(saved as LocalMessage),
+            from: myId || 'me',
+            pending: false,
+            failed: false,
+          };
           if (idx >= 0) {
             const next = [...prev];
-            next[idx] = { ...(saved as LocalMessage), pending: false };
-            next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            return next;
+            next[idx] = normalized;
+            return next.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
           }
-          return [saved as LocalMessage, ...prev].sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
+          return [normalized, ...prev].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
         });
       },
       (tmpId) => {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tmpId ? { ...m, pending: false, failed: true } : m))
-        );
+        setMessages((prev) => prev.map((m) => (m.id === tmpId ? { ...m, pending: false, failed: true } : m)));
       }
     );
   }
 
   // ---- Attachments ----
   async function handleCamera() {
-    if (!conversationId || conversationId === 'new' || !meId) return;
+    if (!conversationId || conversationId === 'new') return;
     const uri = await pickFromCamera();
     if (uri) {
       await sendImageMessage(
         conversationId,
-        meId,
+        myId || 'me',
         uri,
-        (msg) => setMessages((prev) => [msg, ...prev]),
+        (msg) => setMessages((prev) => [
+          { ...msg, from: myId || 'me' },
+          ...prev,
+        ]),
         (tmpId, saved, imageUri) => {
           setAttachMap((m) => ({ ...m, [saved.id]: imageUri }));
           setMessages((prev) => {
             const idx = prev.findIndex((m) => m.id === tmpId);
+            const normalized = {
+              ...(saved as LocalMessage),
+              from: myId || 'me',
+              imageUri,
+              text: (saved as LocalMessage)?.text ?? '',
+              pending: false,
+              failed: false,
+            };
             if (idx < 0) return prev;
             const next = [...prev];
-            next[idx] = {
-              ...(saved as LocalMessage),
-              imageUri,
-              text: '',
-              pending: false,
-            };
-            next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            next[idx] = normalized;
+            next.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
             return next;
           });
         },
@@ -287,27 +293,33 @@ export default function ChatScreen() {
   }
 
   async function handleLibrary() {
-    if (!conversationId || conversationId === 'new' || !meId) return;
+    if (!conversationId || conversationId === 'new') return;
     const uri = await pickFromLibrary();
     if (uri) {
       await sendImageMessage(
         conversationId,
-        meId,
+        myId || 'me',
         uri,
-        (msg) => setMessages((prev) => [msg, ...prev]),
+        (msg) => setMessages((prev) => [
+          { ...msg, from: myId || 'me' },
+          ...prev,
+        ]),
         (tmpId, saved, imageUri) => {
           setAttachMap((m) => ({ ...m, [saved.id]: imageUri }));
           setMessages((prev) => {
             const idx = prev.findIndex((m) => m.id === tmpId);
+            const normalized = {
+              ...(saved as LocalMessage),
+              from: myId || 'me',
+              imageUri,
+              text: (saved as LocalMessage)?.text ?? '',
+              pending: false,
+              failed: false,
+            };
             if (idx < 0) return prev;
             const next = [...prev];
-            next[idx] = {
-              ...(saved as LocalMessage),
-              imageUri,
-              text: '',
-              pending: false,
-            };
-            next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            next[idx] = normalized;
+            next.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
             return next;
           });
         },
@@ -319,11 +331,11 @@ export default function ChatScreen() {
   }
 
   const renderItem = ({ item }: { item: LocalMessage }) => {
-    const isMine = meId && item.from === meId;
+    const mine = isMyMessage(String(item.from), myId || 'me');
     return (
       <MessageBubble
         msg={item}
-        isMine={!!isMine}
+        isMine={!!mine}
         onImagePress={(uri) => setViewerUri(uri)}
       />
     );
@@ -334,10 +346,8 @@ export default function ChatScreen() {
       style={styles.container}
       behavior={Platform.select({ ios: 'padding', android: undefined })}
     >
-      {/* Status bar: black icons over your green header */}
       <StatusBar style="dark" translucent backgroundColor="transparent" />
 
-      {/* Header (green extends under status bar; content sits below it) */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerBar}>
           <TouchableOpacity
@@ -355,7 +365,6 @@ export default function ChatScreen() {
         </View>
       </View>
 
-      {/* Messages */}
       <View style={styles.listWrap}>
         {loading ? (
           <View style={styles.center}><ActivityIndicator /></View>
@@ -372,7 +381,6 @@ export default function ChatScreen() {
         )}
       </View>
 
-      {/* Input + Attachment */}
       <View style={styles.inputBar}>
         <TouchableOpacity
           onPress={() => openAttachmentPicker(handleCamera, handleLibrary)}
@@ -395,7 +403,6 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Zoomable image viewer */}
       <ImageViewing
         images={viewerUri ? [{ uri: viewerUri }] : []}
         imageIndex={0}

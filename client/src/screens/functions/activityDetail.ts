@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import { AppState } from 'react-native';
 import { getAssistByAnyId } from '../../features/assistance/api';
+import { ensureConversationId as ensureConv } from '../../features/messages/ensureConvId';
 import { fetchCustomerRating } from '../../features/ratings/api';
 import { getCompletedByAnyId } from '../../lib/completedCache';
 
@@ -259,7 +260,6 @@ export function useActivityDetail() {
     try {
       if (!doc) return;
       setMsgBusy(true);
-      // Always navigate immediately; let ChatScreen resolve/create the conversation
       const peerUserId =
         doc?.customerId ||
         doc?.clientId ||
@@ -268,7 +268,28 @@ export function useActivityDetail() {
         doc?.client?._id ||
         doc?.customer?._id ||
         undefined;
-      router.push({ pathname: '/chat/[id]', params: { id: 'new', requestId: String(requestId), ...(peerUserId ? { peer: String(peerUserId) } : {}) } });
+
+      let resolvedId: string | undefined;
+      if (peerUserId) {
+        try {
+          resolvedId = await ensureConv(undefined, {
+            peerUserId: String(peerUserId),
+            requestId: requestId ? String(requestId) : undefined,
+          });
+        } catch (err) {
+          console.log('ensureConv failed:', err);
+          resolvedId = undefined;
+        }
+      }
+
+      const params: Record<string, string> = resolvedId
+        ? { id: resolvedId }
+        : { id: 'new' };
+
+      if (requestId) params.requestId = String(requestId);
+      if (peerUserId) params.peerUserId = String(peerUserId);
+
+      router.push({ pathname: '/chat/[id]', params });
     } catch (e) {
       // eslint-disable-next-line no-console
       console.log('handleMessagePress error:', e);
