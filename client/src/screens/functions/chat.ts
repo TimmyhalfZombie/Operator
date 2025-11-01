@@ -179,7 +179,7 @@ export async function sendImageMessage(
   onTempMessage(tmp);
 
   try {
-    const saved = await sendMessage(conversationId, '[photo]');
+    const saved = await sendMessage(conversationId, '[photo]', meId);
     const realId = (saved?.id ?? '').toString();
 
     if (realId) {
@@ -225,7 +225,7 @@ export async function sendTextMessage(
       throw new Error('Cannot connect to server. Please check your network connection.');
     }
     
-    const saved = await sendMessage(conversationId, text);
+    const saved = await sendMessage(conversationId, text, meId);
     console.log('Message sent successfully:', saved);
     onUpdateMessage(tmpId, saved);
   } catch (error) {

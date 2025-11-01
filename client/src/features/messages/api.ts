@@ -58,7 +58,7 @@ function normalizeMsg(raw: any): ChatMessage {
         raw?.sender ??
         raw?.from
     ),
-    text: String(raw?.content ?? raw?.text ?? ''),
+    text: String(raw?.content ?? raw?.text ?? '').replace(/[\r\n]+/g, ' '),
     createdAt: new Date(
       raw?.createdAt ??
         raw?.created_at ??
@@ -235,7 +235,8 @@ export async function fetchMessages(
 
 export async function sendMessage(
   conversationId: string,
-  text: string
+  text: string,
+  myId?: string
 ): Promise<ChatMessage> {
   const payload = {
     conversationId: String(conversationId),
@@ -253,9 +254,23 @@ export async function sendMessage(
   return {
     id: `tmp_${Math.random().toString(36).slice(2, 8)}`,
     conversationId: String(conversationId),
-    from: 'me',
+    from: myId ?? 'me',
     text: payload.content,
     createdAt: new Date().toISOString(),
     pending: true,
   };
+}
+
+export async function deleteMessage(conversationId: string, messageId: string): Promise<void> {
+  await api(`/api/conversations/${conversationId}/messages/${messageId}`, {
+    method: 'DELETE',
+    auth: true,
+  });
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await api(`/api/conversations/${conversationId}`, {
+    method: 'DELETE',
+    auth: true,
+  });
 }

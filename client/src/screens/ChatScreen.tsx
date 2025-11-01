@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   ActivityIndicator,
+  Alert,
   BackHandler,
   FlatList,
   Image,
@@ -23,7 +24,7 @@ import ImageViewing from 'react-native-image-viewing';
 
 import { tokens } from '../auth/tokenStore';
 import { SocketContext } from '../contexts/SocketProvider';
-import { fetchMessages } from '../features/messages/api';
+import { deleteMessage, fetchMessages } from '../features/messages/api';
 import { ensureConversationId } from '../features/messages/ensureConvId';
 import { fetchMe } from '../lib/api';
 import {
@@ -73,6 +74,17 @@ export default function ChatScreen() {
 
   // Lightbox (zoomable) state
   const [viewerUri, setViewerUri] = React.useState<string | null>(null);
+
+  const messagesRef = React.useRef<LocalMessage[]>([]);
+  const attachRef = React.useRef<Record<string, string>>({});
+
+  React.useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  React.useEffect(() => {
+    attachRef.current = attachMap;
+  }, [attachMap]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -170,7 +182,7 @@ export default function ChatScreen() {
         id: String(m._id),
         conversationId: String(m.conversationId),
         from: String(m.senderId?._id || m.senderId),
-        text: String(m.content ?? ''),
+        text: String(m.content ?? '').replace(/[\r\n]+/g, ' '),
         imageUri: attachMap[String(m._id)] || (m.attachment ? String(m.attachment) : null),
         createdAt,
       };
@@ -185,11 +197,27 @@ export default function ChatScreen() {
       });
     };
 
+    const handleDeletedMessage = (evt: any) => {
+      if (!evt?.success) return;
+      const msgId = String(evt?.messageId || evt?.id || '');
+      const convId = String(evt?.conversationId || evt?.conversation_id || '');
+      if (!msgId || convId !== String(conversationId)) return;
+      setMessages((prev) => prev.filter((m) => m.id !== msgId));
+      setAttachMap((prev) => {
+        if (!prev[msgId]) return prev;
+        const next = { ...prev };
+        delete next[msgId];
+        return next;
+      });
+    };
+
     socket.on('newMessage', handleNewMessage);
+    socket.on('message:deleted', handleDeletedMessage);
     return () => {
       socket.off('newMessage', handleNewMessage);
+      socket.off('message:deleted', handleDeletedMessage);
     };
-  }, [socket, conversationId, attachMap]);
+  }, [socket, conversationId, attachMap, myId]);
 
   // 3) Load attachments first, then messages
   React.useEffect(() => {
@@ -218,16 +246,60 @@ export default function ChatScreen() {
     return () => { mounted = false; };
   }, [conversationId]);
 
+  React.useEffect(() => {
+    if (!conversationId || conversationId === 'new') return;
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      try {
+        const items = await fetchMessages(conversationId);
+        if (cancelled) return;
+        const normalized = items.map((m) => {
+          const mine = isMyMessage(String(m.from), myId || 'me');
+          return {
+            ...m,
+            from: mine ? myId || 'me' : String(m.from),
+            text: (m.text ?? '').replace(/[\r\n]+/g, ' '),
+            imageUri: attachMap[m.id] ?? (m as any).attachment ?? null,
+            pending: false,
+            failed: false,
+          } as LocalMessage;
+        });
+
+        normalized.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+        setMessages((prev) => {
+          const fetchedIds = new Set(normalized.map((m) => m.id));
+          const pending = prev.filter((m) => m.pending || m.failed);
+          const combined = [...normalized];
+          pending.forEach((msg) => {
+            if (!fetchedIds.has(msg.id)) combined.push(msg);
+          });
+          return combined.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+        });
+      } catch {}
+
+      if (!cancelled) timeout = setTimeout(poll, 500);
+    };
+
+    timeout = setTimeout(poll, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [conversationId, attachMap, myId]);
+
   async function handleSend() {
-    const text = input.trim();
-    if (!text || !conversationId || conversationId === 'new') return;
+    const raw = input.trim();
+    if (!raw || !conversationId || conversationId === 'new') return;
+    const text = raw.replace(/[\r\n]+/g, ' ');
     setInput('');
     await sendTextMessage(
       conversationId,
       myId || 'me',
       text,
       (msg) => setMessages((prev) => [
-        { ...msg, from: myId || 'me' },
+        { ...msg, from: myId || 'me', text },
         ...prev,
       ]),
       (tmpId, saved) => {
@@ -236,6 +308,7 @@ export default function ChatScreen() {
           const normalized = {
             ...(saved as LocalMessage),
             from: myId || 'me',
+            text,
             pending: false,
             failed: false,
           };
@@ -274,7 +347,7 @@ export default function ChatScreen() {
               ...(saved as LocalMessage),
               from: myId || 'me',
               imageUri,
-              text: (saved as LocalMessage)?.text ?? '',
+              text: (saved as LocalMessage)?.text ? (saved as LocalMessage).text.replace(/[\r\n]+/g, ' ') : '',
               pending: false,
               failed: false,
             };
@@ -312,7 +385,7 @@ export default function ChatScreen() {
               ...(saved as LocalMessage),
               from: myId || 'me',
               imageUri,
-              text: (saved as LocalMessage)?.text ?? '',
+              text: (saved as LocalMessage)?.text ? (saved as LocalMessage).text.replace(/[\r\n]+/g, ' ') : '',
               pending: false,
               failed: false,
             };
@@ -330,6 +403,43 @@ export default function ChatScreen() {
     }
   }
 
+  const handleMessageLongPress = React.useCallback(
+    (msg: LocalMessage) => {
+      if (!conversationId || conversationId === 'new') return;
+      Alert.alert('Delete message', 'Remove this message?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const prevMessages = messagesRef.current;
+            const prevAttach = attachRef.current;
+
+            setMessages((current) => current.filter((m) => m.id !== msg.id));
+            setAttachMap((current) => {
+              if (!current[msg.id]) return current;
+              const next = { ...current };
+              delete next[msg.id];
+              return next;
+            });
+
+            if (msg.pending || msg.failed || msg.id.startsWith('tmp_')) return;
+
+            try {
+              await deleteMessage(conversationId, msg.id);
+            } catch (err) {
+              console.warn('deleteMessage failed', err);
+              setMessages(prevMessages);
+              setAttachMap(prevAttach);
+              Alert.alert('Delete failed', 'Unable to delete message.');
+            }
+          },
+        },
+      ]);
+    },
+    [conversationId]
+  );
+
   const renderItem = ({ item }: { item: LocalMessage }) => {
     const mine = isMyMessage(String(item.from), myId || 'me');
     return (
@@ -337,6 +447,7 @@ export default function ChatScreen() {
         msg={item}
         isMine={!!mine}
         onImagePress={(uri) => setViewerUri(uri)}
+        onLongPress={mine ? () => handleMessageLongPress(item) : undefined}
       />
     );
   };
@@ -419,22 +530,29 @@ function MessageBubble({
   msg,
   isMine,
   onImagePress,
+  onLongPress,
 }: {
   msg: LocalMessage;
   isMine: boolean;
   onImagePress: (uri: string) => void;
+  onLongPress?: () => void;
 }) {
   const hasImage = !!msg.imageUri;
 
   return (
     <View style={[styles.row, isMine ? styles.rowMine : styles.rowTheirs]}>
-      <View
-        style={[
-          styles.bubble,
-          isMine ? styles.bubbleMine : styles.bubbleTheirs,
-          hasImage && styles.bubbleImage,
-        ]}
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onLongPress={onLongPress}
+        delayLongPress={250}
       >
+        <View
+          style={[
+            styles.bubble,
+            isMine ? styles.bubbleMine : styles.bubbleTheirs,
+            hasImage && styles.bubbleImage,
+          ]}
+        >
         {hasImage ? (
           <TouchableOpacity activeOpacity={0.9} onPress={() => msg.imageUri && onImagePress(msg.imageUri)}>
             <Image source={{ uri: msg.imageUri! }} style={styles.image} resizeMode="cover" />
@@ -452,7 +570,8 @@ function MessageBubble({
         ) : msg.failed ? (
           <Text style={[styles.meta, { color: '#ff6b6b' }]}>Failed</Text>
         ) : null}
-      </View>
+        </View>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -505,7 +624,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     gap: 6,
   },
-  bubbleMine: { backgroundColor: MINE_BG, borderTopRightRadius: 4 },
+  bubbleMine: {
+    backgroundColor: MINE_BG,
+    borderTopRightRadius: 4,
+    alignSelf: 'flex-end',
+  },
   bubbleTheirs: { backgroundColor: '#1C1C1C', borderTopLeftRadius: 4 },
 
   bubbleImage: {

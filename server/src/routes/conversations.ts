@@ -297,6 +297,50 @@ r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
   res.json({ items });
 });
 
+/* ---------------- delete message ---------------- */
+
+r.delete('/:id/messages/:messageId', requireAuth as any, async (req: any, res) => {
+  const me: string = String(req.user?.id || '');
+  const convId = String(req.params.id || '');
+  const messageId = String(req.params.messageId || '');
+
+  if (!isValidOid(convId) || !isValidOid(messageId)) return res.status(404).json({ error: 'not found' });
+
+  try {
+    const conv = await Conversation.findById(convId);
+    if (!conv) return res.status(404).json({ error: 'not found' });
+    if (!conv.participants.map((m: any) => String(m)).includes(me)) return res.status(404).json({ error: 'not found' });
+
+    const msg = await Message.findOneAndDelete({ _id: new Types.ObjectId(messageId), conversationId: conv._id });
+    if (!msg) return res.status(404).json({ error: 'not found' });
+
+    // Update conversation preview if needed
+    try {
+      const latest = (await Message.findOne({ conversationId: conv._id }).sort({ createdAt: -1 }).lean()) as any;
+      await Conversation.findByIdAndUpdate(conv._id, {
+        lastMessage: latest?.content ?? latest?.text ?? null,
+        lastMessageAt: latest?.createdAt ?? null,
+      }).catch(() => void 0);
+    } catch (e) {
+      console.warn('[rest] update conversation preview after delete failed:', (e as Error).message);
+    }
+
+    try {
+      const io = getIO();
+      io.to(`conv:${convId}`).emit('message:deleted', {
+        success: true,
+        conversationId: String(convId),
+        messageId: String(messageId),
+      });
+    } catch {}
+
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error('[rest] delete message failed:', e?.message || e);
+    res.status(500).json({ error: 'delete_failed' });
+  }
+});
+
 /* ---------------- ensure conversation ---------------- */
 
 r.post('/ensure', requireAuth as any, async (req: any, res) => {
