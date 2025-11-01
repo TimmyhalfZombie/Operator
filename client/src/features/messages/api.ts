@@ -56,7 +56,36 @@ function cleanMessageText(val: any): string {
   return collapsed;
 }
 
+function extractPreviewText(raw: any): string {
+  if (!raw) return '';
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.toLowerCase() === '[attachment]' || trimmed.toLowerCase() === '[photo]') {
+      return 'Photo';
+    }
+    return cleanMessageText(raw);
+  }
+  if (typeof raw === 'object') {
+    const content = raw?.content ?? raw?.text ?? raw?.message ?? '';
+    const cleaned = cleanMessageText(content);
+    if (cleaned) return cleaned;
+    if (raw?.attachment || raw?.imageUri || raw?.image_uri || raw?.mediaUrl || raw?.media_url) {
+      return 'Photo';
+    }
+  }
+  return '';
+}
+
 function normalizeMsg(raw: any): ChatMessage {
+  const rawContent = raw?.content ?? raw?.text ?? '';
+  const cleanedContent = cleanMessageText(rawContent);
+  const hasCleanContent = typeof cleanedContent === 'string' && cleanedContent.length > 0;
+  const fallbackText = hasCleanContent
+    ? cleanedContent
+    : raw?.attachment
+      ? '[attachment]'
+      : '';
+
   return {
     id: toId(raw?._id ?? raw?.id),
     conversationId: toId(
@@ -72,7 +101,7 @@ function normalizeMsg(raw: any): ChatMessage {
         raw?.sender ??
         raw?.from
     ),
-    text: cleanMessageText(raw?.content ?? raw?.text ?? ''),
+    text: fallbackText,
     createdAt: new Date(
       raw?.createdAt ??
         raw?.created_at ??
@@ -171,7 +200,8 @@ export async function listConversations(limit = 50): Promise<ConversationPreview
 
   return rows.slice(0, limit).map((c: any) => {
     const id = toId(c?._id ?? c?.id);
-    const last = c?.lastMessage ?? c?.last_message ?? c?.lastMessage?.content ?? c?.last_message?.content ?? null;
+    const rawLast = c?.lastMessage ?? c?.last_message ?? null;
+    const last = extractPreviewText(rawLast) || extractPreviewText(rawLast?.content) || extractPreviewText(c?.lastMessage?.content);
     const lastCreatedAt =
       c?.lastMessageAt ??
       c?.last_message_at ??

@@ -202,7 +202,24 @@ r.get('/', requireAuth as any, async (req: any, res) => {
         $match: { participantIds: String(me) },
       };
 
-  const pipeline: any[] = [coalesceStage, ensureParticipantIdsStage, matchStage,
+  const pipeline: any[] = [
+    coalesceStage,
+    ensureParticipantIdsStage,
+    matchStage,
+    {
+      $lookup: {
+        from: 'messages',
+        let: { convId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$conversationId', '$$convId'] } } },
+          { $sort: { createdAt: -1 } },
+          { $limit: 1 },
+          { $project: { content: 1, attachment: 1 } },
+        ],
+        as: 'lastMessageDoc',
+      },
+    },
+    { $addFields: { lastMessageDoc: { $arrayElemAt: ['$lastMessageDoc', 0] } } },
     { $sort: { lastMessageAt: -1, updatedAt: -1 } },
     { $limit: limit },
     {
@@ -214,9 +231,11 @@ r.get('/', requireAuth as any, async (req: any, res) => {
         requestId: 1,
         title: 1,
         lastMessage: 1,
+        lastMessageDoc: 1,
         lastMessageAt: 1,
       },
-    }];
+    },
+  ];
 
   const raw = await Conversation.aggregate(pipeline);
   const items = await Promise.all(
@@ -233,11 +252,21 @@ r.get('/', requireAuth as any, async (req: any, res) => {
         ).lean();
         unread = (meta as any)?.unread ?? null;
       } catch {}
+      const lastDoc = c?.lastMessageDoc || null;
+      const storedLast = typeof c?.lastMessage === 'string' ? c.lastMessage : null;
+      const preview = typeof lastDoc?.content === 'string' && lastDoc.content.trim()
+        ? lastDoc.content
+        : storedLast && storedLast.trim()
+          ? storedLast
+          : lastDoc?.attachment
+            ? '[attachment]'
+            : null;
+
       return {
         id: String(c._id),
         title: title || 'Conversation',
         requestId: c.requestId ? String(c.requestId) : null,
-        lastMessage: c.lastMessage ?? null,
+        lastMessage: preview,
         lastMessageAt: c.lastMessageAt ?? null,
         participants: Array.isArray(c.participantIds)
           ? c.participantIds.map((id: any) => String(id))
