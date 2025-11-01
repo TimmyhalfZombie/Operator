@@ -313,6 +313,7 @@ r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
     conversationId: String(m.conversationId),
     from: String(m.senderId),
     text: m.content,
+    attachment: m.attachment ?? null,
     createdAt: (m.createdAt ?? new Date()).toISOString(),
   })).reverse();
 
@@ -446,10 +447,14 @@ r.post('/ensure', requireAuth as any, async (req: any, res) => {
 r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   const convId = String(req.params.id || '');
-  const text = sanitizeMessageText((req.body as any)?.text || '');
+  const rawText = (req.body as any)?.text;
+  const attachment = typeof (req.body as any)?.attachment === 'string'
+    ? String((req.body as any).attachment).trim()
+    : null;
+  const text = sanitizeMessageText(rawText || '');
 
   if (!isValidOid(convId)) return res.status(404).json({ error: 'not found' });
-  if (!text) return res.status(400).json({ error: 'Text is required' });
+  if (!text && !attachment) return res.status(400).json({ error: 'Message requires text or attachment' });
 
   try {
     const conv = await Conversation.findById(convId);
@@ -463,10 +468,13 @@ r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
       conversationId: conv._id,
       senderId: sender,
       content: text,
+      attachment,
       createdAt: stamp,
     });
 
-    await Conversation.findByIdAndUpdate(conv._id, { lastMessage: text, lastMessageAt: stamp }).catch((e) =>
+    const previewText = text || (attachment ? '' : '');
+
+    await Conversation.findByIdAndUpdate(conv._id, { lastMessage: previewText, lastMessageAt: stamp }).catch((e) =>
       console.warn('[rest] update conversation preview failed:', (e as Error).message)
     );
 
@@ -499,6 +507,7 @@ r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
       conversationId: String(conv._id),
       from: String(msg.senderId),
       text,
+      attachment,
       createdAt: (msg.createdAt ?? stamp).toISOString(),
     };
 

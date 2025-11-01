@@ -11,13 +11,14 @@ import messagesRoutes from './routes/messages';
 import operatorRoutes from './routes/operator';
 import ratingsRoutes from './routes/ratings';
 import routeRoutes from './routes/route';
+import uploadsRoutes from './routes/uploads';
 
 const app = express();
 
 /* ---------- middleware ---------- */
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 const corsOrigin = config.clientUrl || true;
 const corsOptions: cors.CorsOptions = {
@@ -47,6 +48,7 @@ app.use('/api/assist', assistRoutes);
 app.use('/api/geo', geoRoutes);
 app.use('/api/conversations', conversationsRoutes);
 app.use('/api/messages', messagesRoutes);
+app.use('/api/uploads', uploadsRoutes);
 
 // ORS routing proxy
 app.use('/api/route', routeRoutes);

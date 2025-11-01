@@ -5,6 +5,7 @@ import { ActionSheetIOS, Alert, Platform } from 'react-native';
 import { tokens } from '../../auth/tokenStore';
 import { sendMessage } from '../../features/messages/api';
 import { ensureConversationId } from '../../features/messages/ensureConvId';
+import { uploadImageFromUri } from '../../lib/uploads';
 
 // Types
 export type LocalMessage = {
@@ -179,14 +180,15 @@ export async function sendImageMessage(
   onTempMessage(tmp);
 
   try {
-    const saved = await sendMessage(conversationId, '[photo]', meId);
+    const remoteUrl = await uploadImageFromUri(uri, 'app/messages');
+    const saved = await sendMessage(conversationId, '', meId, remoteUrl);
     const realId = (saved?.id ?? '').toString();
 
     if (realId) {
-      await saveAttachment(conversationId, realId, uri);
+      await saveAttachment(conversationId, realId, remoteUrl);
     }
 
-    onUpdateMessage(tmpId, saved, uri);
+    onUpdateMessage(tmpId, saved, remoteUrl);
   } catch (error) {
     console.error('Failed to send image message:', error);
     onError(tmpId);

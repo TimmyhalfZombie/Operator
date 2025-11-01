@@ -40,7 +40,7 @@ import {
   sendTextMessage,
 } from './functions/chat';
 
-const BG = '#9FE5B6';
+const BG = '#CFFFE0';
 const MINE_BG = '#6EFF87';
 const HEADER_BG = '#0C0C0C';
 const TEXT_DARK = '#0C0C0C';
@@ -63,6 +63,10 @@ function TextInput(props: TextInputProps) {
 function normalizeMessageText(val: string): string {
   const collapsed = String(val ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
   if (!collapsed) return '';
+  const lower = collapsed.toLowerCase();
+  if (lower === '[photo]' || lower === '[attachment]') {
+    return '';
+  }
   const tokens = collapsed.split(' ');
   if (tokens.length > 1 && tokens.every((tok) => tok.length === 1)) {
     return tokens.join('');
@@ -414,7 +418,7 @@ export default function ChatScreen() {
             const normalized = {
               ...(saved as LocalMessage),
               from: myId || 'me',
-              text: normalizeMessageText((saved as LocalMessage)?.text ?? ''),
+              text: saved.text,
               imageUri,
               pending: false,
               failed: false,
@@ -452,7 +456,7 @@ export default function ChatScreen() {
             const normalized = {
               ...(saved as LocalMessage),
               from: myId || 'me',
-              text: normalizeMessageText((saved as LocalMessage)?.text ?? ''),
+              text: saved.text,
               imageUri,
               pending: false,
               failed: false,
@@ -625,7 +629,9 @@ function MessageBubble({
         >
         {hasImage ? (
           <TouchableOpacity activeOpacity={0.9} onPress={() => msg.imageUri && onImagePress(msg.imageUri)}>
-            <Image source={{ uri: msg.imageUri! }} style={styles.image} resizeMode="cover" />
+            <View style={styles.imageContainer}>
+              <Image source={{ uri: msg.imageUri! }} style={styles.image} resizeMode="cover" />
+            </View>
           </TouchableOpacity>
         ) : null}
 
@@ -693,33 +699,55 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 14,
-    gap: 6,
-    borderWidth: 0.5,
-    borderColor: '#000000',
   },
   bubbleMine: {
     backgroundColor: MINE_BG,
     borderTopRightRadius: 4,
     alignSelf: 'flex-end',
+    borderWidth: 0,
   },
-  bubbleTheirs: { backgroundColor: '#1C1C1C', borderTopLeftRadius: 4 },
+  bubbleTheirs: {
+    backgroundColor: '#222020ff',
+    borderTopLeftRadius: 4,
+    borderWidth: 0.5,
+    borderColor: '#000000',
+  },
 
   bubbleImage: {
     backgroundColor: 'transparent',
     paddingHorizontal: 0,
     paddingVertical: 0,
     borderRadius: 0,
+    borderWidth: 0,
+    alignItems: 'flex-end',
   },
 
-  msgText: { fontSize: 17, lineHeight: 22, fontFamily: 'Inter-Bold' },
-  msgMine: { color: TEXT_DARK, textAlign: 'left' },
-  msgTheirs: { color: '#FFFFFF', textAlign: 'left' },
+  imageContainer: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    maxWidth: BUBBLE_MAX_WIDTH * 0.6,
+  },
 
   image: {
-    width: 220,
-    height: 220,
-    borderRadius: 12,
+    width: '100%',
+    aspectRatio: 1,
     backgroundColor: 'transparent',
+  },
+
+  msgText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontFamily: 'Inter-Bold',
+  },
+
+  msgMine: {
+    color: TEXT_DARK,
+    textAlign: 'left',
+  },
+
+  msgTheirs: {
+    color: '#FFFFFF',
+    textAlign: 'left',
   },
 
   meta: { marginTop: 4, fontSize: 11, opacity: 0.8, fontFamily: 'Inter-Bold' },
@@ -757,6 +785,8 @@ const styles = StyleSheet.create({
     color: TEXT_DARK,
     fontSize: 15,
     fontFamily: 'Inter-Bold',
+    borderWidth: 1,
+    borderColor: '#0A7F34',
   },
   sendBtn: {
     width: 44,

@@ -46,6 +46,8 @@ function toId(v: any): string {
 
 function cleanMessageText(val: any): string {
   const collapsed = String(val ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
+  const lower = collapsed.toLowerCase();
+  if (lower === '[photo]' || lower === '[attachment]') return '';
   if (!collapsed) return '';
   const tokens = collapsed.split(' ');
   if (tokens.length > 1 && tokens.every((tok) => tok.length === 1)) {
@@ -255,11 +257,13 @@ export async function fetchMessages(
 export async function sendMessage(
   conversationId: string,
   text: string,
-  myId?: string
+  myId?: string,
+  attachment?: string | null
 ): Promise<ChatMessage> {
   const payload = {
     conversationId: String(conversationId),
     content: cleanMessageText(text),
+    attachment: attachment ? String(attachment) : undefined,
   };
 
   try {
@@ -275,8 +279,8 @@ export async function sendMessage(
     conversationId: String(conversationId),
     from: myId ?? 'me',
     text: cleanMessageText(payload.content),
+    attachment: attachment ?? null,
     createdAt: new Date().toISOString(),
-    attachment: null,
     pending: true,
   };
 }
