@@ -282,12 +282,22 @@ export function useActivityDetail() {
         }
       }
 
+      const displayName =
+        doc?.clientName ||
+        doc?.customerName ||
+        doc?.client?.name ||
+        doc?.customer?.name ||
+        (p as any).customer ||
+        customer ||
+        'Client';
+
       const params: Record<string, string> = resolvedId
         ? { id: resolvedId }
         : { id: 'new' };
 
       if (requestId) params.requestId = String(requestId);
       if (peerUserId) params.peerUserId = String(peerUserId);
+      if (displayName) params.name = String(displayName);
 
       router.push({ pathname: '/chat/[id]', params });
     } catch (e) {

@@ -42,7 +42,11 @@ export default function RootLayout() {
     const unsub = onNotificationResponse((resp) => {
       const data: any = resp.notification.request.content.data || {};
       if (data?.type === 'chat' && data?.conversationId) {
-        router.push({ pathname: '/(tabs)/chat/[id]', params: { id: String(data.conversationId) } });
+        const params: Record<string, string> = { id: String(data.conversationId) };
+        if (typeof data?.name === 'string' && data.name.trim()) {
+          params.name = data.name.trim();
+        }
+        router.push({ pathname: '/(tabs)/chat/[id]', params });
       } else if (data?.type === 'assist' && data?.requestId) {
         router.push({ pathname: '/ongoing-detail', params: { id: String(data.requestId) } });
       }

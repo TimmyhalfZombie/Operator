@@ -34,7 +34,8 @@ export default function MessagesScreen() {
   );
 
   const handleConversationPress = (item: any) => {
-    router.push({ pathname: '/chat/[id]', params: { id: item.id } });
+    const displayName = item.title || item.name || 'Conversation';
+    router.push({ pathname: '/chat/[id]', params: { id: item.id, name: displayName } });
   };
 
   const handleConversationLongPress = (item: any) => {

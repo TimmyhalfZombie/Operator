@@ -81,7 +81,8 @@ export default function RequestAssistanceScreen() {
       const res = await acceptAssist(data.id);
       if (res?.ok && res?.conversationId) {
         // 🔹 Navigate operator into the shared chat room immediately
-        router.push(`/ (tabs)/chat/${res.conversationId}`.replace(/\s+/g, ''));
+        const displayName = data.clientName || 'Client';
+        router.push({ pathname: '/(tabs)/chat/[id]', params: { id: String(res.conversationId), name: displayName } });
       } else {
         // no conv id yet; UI remains accepted (can still Message via ensure endpoint)
       }

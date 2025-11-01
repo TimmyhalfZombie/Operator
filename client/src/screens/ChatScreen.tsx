@@ -24,7 +24,7 @@ import ImageViewing from 'react-native-image-viewing';
 
 import { tokens } from '../auth/tokenStore';
 import { SocketContext } from '../contexts/SocketProvider';
-import { deleteMessage, fetchMessages } from '../features/messages/api';
+import { deleteMessage, fetchMessages, getConversation } from '../features/messages/api';
 import { ensureConversationId } from '../features/messages/ensureConvId';
 import { fetchMe } from '../lib/api';
 import {
@@ -66,13 +66,14 @@ function normalizeMessageText(val: string): string {
 
 export default function ChatScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id?: string; peerUserId?: string; requestId?: string }>();
+  const params = useLocalSearchParams<{ id?: string; peerUserId?: string; requestId?: string; name?: string }>();
   const initialId = String(params?.id ?? '');
+  const initialTitle = typeof params?.name === 'string' && params.name.trim() ? params.name.trim() : 'Chat';
   const insets = useSafeAreaInsets();
   const { socket } = React.useContext(SocketContext);
 
   const [conversationId, setConversationId] = React.useState<string>(initialId);
-  const [title, setTitle] = React.useState<string>('Chat');
+  const [title, setTitle] = React.useState<string>(initialTitle);
   const [myId, setMyId] = React.useState<string>(getMyIdSync() || 'me');
   const [loading, setLoading] = React.useState(true);
 
@@ -82,6 +83,34 @@ export default function ChatScreen() {
 
   // Persisted local attachments (messageId -> uri)
   const [attachMap, setAttachMap] = React.useState<Record<string, string>>({});
+
+  React.useEffect(() => {
+    if (typeof params?.name === 'string' && params.name.trim()) {
+      setTitle(params.name.trim());
+    }
+  }, [params?.name]);
+
+  React.useEffect(() => {
+    if (!conversationId || conversationId === 'new') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await getConversation(conversationId);
+        const resolvedTitle = info?.title?.trim?.();
+        if (
+          !cancelled &&
+          resolvedTitle &&
+          resolvedTitle.toLowerCase() !== 'conversation' &&
+          resolvedTitle.toLowerCase() !== 'chat'
+        ) {
+          setTitle(resolvedTitle);
+        }
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
 
   // Lightbox (zoomable) state
   const [viewerUri, setViewerUri] = React.useState<string | null>(null);
@@ -134,7 +163,10 @@ export default function ChatScreen() {
         if (!cancelled && resolved) {
           setConversationId(resolved);
           try {
-            router.replace({ pathname: '/(tabs)/chat/[id]', params: { id: resolved } });
+            const nameParam = typeof params?.name === 'string' && params.name.trim() ? params.name.trim() : undefined;
+            const nextParams: Record<string, string> = { id: resolved };
+            if (nameParam) nextParams.name = nameParam;
+            router.replace({ pathname: '/(tabs)/chat/[id]', params: nextParams });
           } catch {}
         }
       } else {
@@ -151,11 +183,14 @@ export default function ChatScreen() {
     const onReply = (res: any) => {
       if (!res?.success) return;
       try {
-        const me = String((socket as any).user?.id ?? '');
+        const myCandidate = myId && myId !== 'me' ? String(myId) : String((socket as any).user?.id ?? '');
+        const me = myCandidate || '';
         const others = (res.data?.participants || []).filter((p: any) => String(p._id) !== me);
         const peer = others[0];
-        const t = peer?.name || 'Conversation';
-        setTitle(t);
+        const t = peer?.name || peer?.username || peer?.email || 'Conversation';
+        if (t && t.toLowerCase() !== 'conversation' && t.toLowerCase() !== 'chat') {
+          setTitle(String(t));
+        }
       } catch {}
     };
     socket.once('verifyConversationParticipants', onReply);
@@ -163,7 +198,7 @@ export default function ChatScreen() {
     return () => {
       socket.off('verifyConversationParticipants', onReply);
     };
-  }, [socket, conversationId]);
+  }, [socket, conversationId, myId]);
 
   // Android hardware back: go to Messages tab
   React.useEffect(() => {
@@ -613,7 +648,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    color: MINE_BG,
+    color: '#6EFF87',
     fontSize: 18,
     fontFamily: 'Inter-Black',
     marginTop: 2,
@@ -653,7 +688,7 @@ const styles = StyleSheet.create({
 
   msgText: { fontSize: 15, lineHeight: 20, fontFamily: 'Inter-Bold' },
   msgMine: { color: TEXT_DARK, textAlign: 'left' },
-  msgTheirs: { color: TEXT_DARK, textAlign: 'left' },
+  msgTheirs: { color: '#FFFFFF', textAlign: 'left' },
 
   image: {
     width: 220,
@@ -694,7 +729,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     backgroundColor: '#C0FFCB',
-    color: TEXT_LIGHT,
+    color: TEXT_DARK,
     fontSize: 15,
     fontFamily: 'Inter-Bold',
   },
