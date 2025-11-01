@@ -182,10 +182,23 @@ function buildMessagePayload(doc: any, usersMap?: Map<string, any>) {
 async function buildConversationPayload(convDoc: any, currentUserId: string, options: { lastMessage?: any } = {}) {
   const conv = convDoc?.toObject ? convDoc.toObject() : convDoc;
   const convId = String(conv?._id ?? '');
-  const memberIds: string[] = Array.isArray(conv?.participants) ? conv.participants.map((m: any) => String(m)) : [];
-  const usersMap = await fetchUserSummaries(memberIds);
 
-  const participants: Array<{ _id: string; name: string; avatar: string | null; email?: string }> = memberIds.map((id: string) => {
+  const participantIdsFromDoc: string[] = Array.isArray(conv?.participantIds)
+    ? conv.participantIds.map((id: any) => String(id))
+    : [];
+  const participantIdsFromParticipants: string[] = Array.isArray(conv?.participants)
+    ? conv.participants.map((m: any) => String(m))
+    : [];
+
+  const allParticipantIds = Array.from(
+    new Set(
+      [...participantIdsFromDoc, ...participantIdsFromParticipants, String(currentUserId)].filter((id) => id && id !== 'undefined')
+    )
+  );
+
+  const usersMap = await fetchUserSummaries(allParticipantIds);
+
+  const participants: Array<{ _id: string; name: string; avatar: string | null; email?: string }> = allParticipantIds.map((id: string) => {
     const user = usersMap.get(id);
     return {
       _id: id,
@@ -235,6 +248,27 @@ async function buildConversationPayload(convDoc: any, currentUserId: string, opt
   };
 }
 
+function extractParticipantIds(conv: any): string[] {
+  if (!conv) return [];
+  const ids = new Set<string>();
+  if (Array.isArray(conv?.participantIds)) {
+    conv.participantIds.forEach((id: any) => {
+      if (id != null) ids.add(String(id));
+    });
+  }
+  if (Array.isArray(conv?.participants)) {
+    conv.participants.forEach((id: any) => {
+      if (id != null) ids.add(String(id));
+    });
+  }
+  if (Array.isArray((conv as any)?.members)) {
+    (conv as any).members.forEach((id: any) => {
+      if (id != null) ids.add(String(id));
+    });
+  }
+  return Array.from(ids);
+}
+
 function sanitizeMessageText(raw: any): string {
   const collapsed = String(raw ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
   if (!collapsed) return '';
@@ -257,7 +291,7 @@ function emitToUser(io: Server, userId: string, event: string, payload: any) {
 async function broadcastConversationUpdate(io: Server, convId: Types.ObjectId | string, options: { lastMessage?: any } = {}) {
   const conv = (await Conversation.findById(convId).lean()) as any;
   if (!conv) return;
-  const participantIds: string[] = Array.isArray(conv.participants) ? conv.participants.map((m: any) => String(m)) : [];
+  const participantIds = extractParticipantIds(conv);
 
   await Promise.all(
     participantIds.map(async (uid: string) => {
@@ -303,28 +337,15 @@ export function initSocket(httpServer: HTTPServer) {
     // Auto-join all my conversation rooms
     try {
       let convIds: string[] = [];
+      const joinQuery: any = {
+        $or: [],
+      };
       if (Types.ObjectId.isValid(me.id)) {
-        const mine = await Conversation.find({ participants: new Types.ObjectId(me.id) }, { _id: 1 }).lean();
-        convIds = mine.map((c: any) => String(c._id));
-      } else {
-        const agg = await Conversation.aggregate([
-          {
-            $addFields: {
-              participants: {
-                $cond: [
-                  { $gt: [{ $size: { $ifNull: ['$participants', []] } }, 0] },
-                  '$participants',
-                  '$members',
-                ],
-              },
-            },
-          },
-          { $addFields: { participantsStr: { $map: { input: '$participants', as: 'm', in: { $toString: '$$m' } } } } },
-          { $match: { participantsStr: me.id } },
-          { $project: { _id: 1 } },
-        ]);
-        convIds = agg.map((c: any) => String(c._id));
+        joinQuery.$or.push({ participants: new Types.ObjectId(me.id) });
       }
+      joinQuery.$or.push({ participantIds: me.id }, { members: me.id });
+      const mine = await Conversation.find(joinQuery, { _id: 1 }).lean();
+      convIds = mine.map((c: any) => String(c._id));
       convIds.forEach((id) => socket.join(convRoom(id)));
       if (process.env.NODE_ENV !== 'production') console.log('[socket] joined rooms:', convIds);
     } catch (e) {
@@ -354,19 +375,12 @@ export function initSocket(httpServer: HTTPServer) {
           ? maybeAck
           : undefined;
       try {
-        const query = Types.ObjectId.isValid(me.id)
-          ? {
-              $or: [
-                { participants: new Types.ObjectId(me.id) },
-                { members: new Types.ObjectId(me.id) },
-              ],
-            }
-          : {
-              $or: [
-                { participants: me.id },
-                { members: me.id },
-              ],
-            };
+        const orConditions: any[] = [];
+        if (Types.ObjectId.isValid(me.id)) {
+          orConditions.push({ participants: new Types.ObjectId(me.id) });
+        }
+        orConditions.push({ participantIds: me.id }, { members: me.id }, { participants: me.id });
+        const query = orConditions.length === 1 ? orConditions[0] : { $or: orConditions };
 
         const convs = await Conversation.find(query).sort({ updatedAt: -1 }).lean();
         const data = await Promise.all(convs.map((conv) => buildConversationPayload(conv, me.id)));
@@ -393,26 +407,42 @@ export function initSocket(httpServer: HTTPServer) {
           return;
         }
 
-        const participantsHash = participants.slice().sort().join(':');
-        const memberOids = participants
+        const participantIds = participants.slice().sort();
+        const participantsHash = participantIds.join(':');
+        const memberOids = participantIds
           .map((id) => toObjectId(id))
           .filter((oid): oid is Types.ObjectId => !!oid);
 
         let conv = await Conversation.findOne({ participantsHash });
+        if (!conv) {
+          conv = await Conversation.findOne({ participantIds: { $all: participantIds } });
+        }
         const existing = !!conv;
 
-        if (!conv) {
+          if (!conv) {
           try {
             conv = await Conversation.create({
               participants: memberOids,
+              participantIds,
               title: payload?.name || undefined,
               lastMessageAt: new Date(),
             });
           } catch (createErr: any) {
             if ((createErr as any)?.code === 11000) {
-              conv = await Conversation.findOne({ participantsHash });
+              conv = await Conversation.findOne({ participantsHash }) ?? await Conversation.findOne({ participantIds: { $all: participantIds } });
             }
             if (!conv) throw createErr;
+          }
+        } else {
+          const needsUpdate =
+            !Array.isArray((conv as any).participantIds) ||
+            participantIds.length !== (conv as any).participantIds.length ||
+            participantIds.some((id) => !(conv as any).participantIds.map(String).includes(id));
+          if (needsUpdate) {
+            await Conversation.updateOne(
+              { _id: conv._id },
+              { $set: { participantIds, participantsHash } }
+            ).catch(() => undefined);
           }
         }
 
@@ -469,7 +499,7 @@ export function initSocket(httpServer: HTTPServer) {
           return;
         }
 
-        const participantIds = Array.isArray(conv.participants) ? conv.participants.map((m: any) => String(m)) : [];
+        const participantIds = extractParticipantIds(conv);
         if (!participantIds.includes(me.id)) {
           socket.emit('deleteConversation', { success: false, msg: 'Forbidden' });
           return;
@@ -498,6 +528,12 @@ export function initSocket(httpServer: HTTPServer) {
         const conv = (await Conversation.findById(conversationId).lean()) as any;
         if (!conv) {
           socket.emit('markAsRead', { success: false, msg: 'Conversation not found' });
+          return;
+        }
+
+        const participantIds = extractParticipantIds(conv);
+        if (!participantIds.includes(me.id)) {
+          socket.emit('markAsRead', { success: false, msg: 'Forbidden' });
           return;
         }
 
@@ -535,7 +571,8 @@ export function initSocket(httpServer: HTTPServer) {
           ack ? ack(payload) : socket.emit('getMessages', payload);
           return;
         }
-        if (!conv.participants.map(String).includes(me.id)) {
+        const participantIds = extractParticipantIds(conv);
+        if (!participantIds.includes(me.id)) {
           const payload = { success: false, msg: 'Forbidden' };
           ack ? ack(payload) : socket.emit('getMessages', payload);
           return;
@@ -583,7 +620,8 @@ export function initSocket(httpServer: HTTPServer) {
         throw e;
       }
       if (!conv) throw new Error('conversation_not_found');
-      const isMember = conv.participants.map(String).includes(me.id);
+      const participantIds = extractParticipantIds(conv);
+      const isMember = participantIds.includes(me.id);
       if (!isMember) throw new Error('forbidden');
 
       const stamp = new Date();
@@ -616,18 +654,18 @@ export function initSocket(httpServer: HTTPServer) {
         lastMessageAt: stamp,
       }).catch((e) => console.warn('[socket] update conversation preview failed:', (e as Error).message));
 
-      const others = conv.participants.map((member: any) => String(member)).filter((memberId: string) => memberId !== me.id);
+      const others = participantIds.filter((memberId: string) => memberId !== me.id);
 
       await Promise.all(
         others.map(async (uid: string) => {
           try {
             const oid = toObjectId(uid);
             if (oid) {
-              await ConversationMeta.updateOne(
+            await ConversationMeta.updateOne(
                 { conversationId: conv._id, userId: oid },
-                { $inc: { unread: 1 } },
-                { upsert: true }
-              );
+              { $inc: { unread: 1 } },
+              { upsert: true }
+            );
             }
           } catch {}
         })

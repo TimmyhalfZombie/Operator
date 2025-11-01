@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -46,6 +47,11 @@ const TEXT_DARK = '#0C0C0C';
 const TEXT_LIGHT = '#EDEDED';
 const BORDER = '#262626';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const BUBBLE_MAX_WIDTH = SCREEN_WIDTH * 0.9;
+const BUBBLE_MIN_WIDTH_BASE = 36;
+const BUBBLE_MIN_WIDTH_PER_CHAR = 6;
+
 // Local wrappers to default all text on this screen to Inter (boldy)
 function Text(props: TextProps) {
   return <RNText {...props} style={[{ fontFamily: 'Inter-Bold' }, props.style]} />;
@@ -62,6 +68,16 @@ function normalizeMessageText(val: string): string {
     return tokens.join('');
   }
   return collapsed;
+}
+
+function computeBubbleMinWidth(text?: string | null, hasImage?: boolean): number {
+  if (hasImage) return BUBBLE_MIN_WIDTH_BASE;
+  const trimmed = String(text ?? '').trim();
+  const len = trimmed.length;
+  if (!len) return BUBBLE_MIN_WIDTH_BASE;
+  const estimate = BUBBLE_MIN_WIDTH_BASE + len * BUBBLE_MIN_WIDTH_PER_CHAR;
+  const clamped = Math.min(BUBBLE_MAX_WIDTH, Math.max(BUBBLE_MIN_WIDTH_BASE, estimate));
+  return clamped;
 }
 
 export default function ChatScreen() {
@@ -281,8 +297,12 @@ export default function ChatScreen() {
 
         const sortedDesc = [...items].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
         const enriched: LocalMessage[] = sortedDesc.map((m) => ({
-          ...m,
-          imageUri: map[m.id] ?? null,
+          id: m.id,
+          conversationId: m.conversationId,
+          from: String(m.from),
+          text: m.text,
+          createdAt: m.createdAt,
+          imageUri: map[m.id] ?? m.attachment ?? null,
         }));
         setMessages(enriched);
       } finally {
@@ -304,10 +324,12 @@ export default function ChatScreen() {
         const normalized = items.map((m) => {
           const mine = isMyMessage(String(m.from), myId || 'me');
           return {
-            ...m,
+            id: m.id,
+            conversationId: m.conversationId,
             from: mine ? myId || 'me' : String(m.from),
             text: normalizeMessageText(m.text ?? ''),
-            imageUri: attachMap[m.id] ?? (m as any).attachment ?? null,
+            createdAt: m.createdAt,
+            imageUri: attachMap[m.id] ?? m.attachment ?? null,
             pending: false,
             failed: false,
           } as LocalMessage;
@@ -584,6 +606,7 @@ function MessageBubble({
   onLongPress?: () => void;
 }) {
   const hasImage = !!msg.imageUri;
+  const minWidth = computeBubbleMinWidth(msg.text, hasImage);
 
   return (
     <View style={[styles.row, isMine ? styles.rowMine : styles.rowTheirs]}>
@@ -597,6 +620,7 @@ function MessageBubble({
             styles.bubble,
             isMine ? styles.bubbleMine : styles.bubbleTheirs,
             hasImage && styles.bubbleImage,
+            { minWidth },
           ]}
         >
         {hasImage ? (
@@ -664,8 +688,9 @@ const styles = StyleSheet.create({
   rowTheirs: { justifyContent: 'flex-start' },
 
   bubble: {
-    maxWidth: '90%',
-    paddingHorizontal: 12,
+    maxWidth: BUBBLE_MAX_WIDTH,
+    minWidth: BUBBLE_MIN_WIDTH_BASE,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 14,
     gap: 6,
@@ -686,7 +711,7 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
 
-  msgText: { fontSize: 15, lineHeight: 20, fontFamily: 'Inter-Bold' },
+  msgText: { fontSize: 17, lineHeight: 22, fontFamily: 'Inter-Bold' },
   msgMine: { color: TEXT_DARK, textAlign: 'left' },
   msgTheirs: { color: '#FFFFFF', textAlign: 'left' },
 

@@ -31,6 +31,7 @@ export type ChatMessage = {
   from: string;
   text: string;
   createdAt: string;
+  attachment?: string | null;
   pending?: boolean;
   failed?: boolean;
 };
@@ -76,6 +77,13 @@ function normalizeMsg(raw: any): ChatMessage {
         raw?.timestamp ??
         Date.now()
     ).toISOString(),
+    attachment:
+      raw?.attachment ??
+      raw?.imageUri ??
+      raw?.image_uri ??
+      raw?.mediaUrl ??
+      raw?.media_url ??
+      null,
   };
 }
 function normalizeMsgList(items: any[]): ChatMessage[] {
@@ -268,6 +276,7 @@ export async function sendMessage(
     from: myId ?? 'me',
     text: cleanMessageText(payload.content),
     createdAt: new Date().toISOString(),
+    attachment: null,
     pending: true,
   };
 }
