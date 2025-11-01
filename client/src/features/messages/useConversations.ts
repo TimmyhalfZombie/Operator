@@ -12,11 +12,12 @@ export function useConversations() {
       const data = await listConversations(100);
       const mapped = data.map((item: any) => ({
         id: item.id,
-        title: item.title || item.name || 'Conversation',
+        title: item.title || item.name || item?.peer?.name || 'Conversation',
         lastMessage: item.lastMessage || item.last_message || null,
         lastMessageAt: item.lastMessageAt || item.last_message_at || null,
         unread: item.unread ?? item.unreadCount ?? item.unread_count ?? null,
         requestId: item.requestId ?? item.request_id ?? null,
+        avatarUrl: item.avatarUrl ?? item.peer?.avatarUrl ?? null,
       }));
       setItems(mapped as ConversationPreview[]);
       setError(null);

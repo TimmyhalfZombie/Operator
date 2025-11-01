@@ -11,6 +11,7 @@ export type ConversationPreview = {
   lastMessageAt?: string | null;
   unread?: number | null;
   requestId?: string | null;
+  avatarUrl?: string | null;
 };
 
 export type ConversationDetail = ConversationPreview & {
@@ -220,6 +221,7 @@ export async function listConversations(limit = 50): Promise<ConversationPreview
             ? c.unread
             : null,
       requestId: c?.requestId ? String(c.requestId) : c?.request_id ? String(c.request_id) : null,
+      avatarUrl: c?.peer?.avatarUrl ?? c?.peer?.avatar ?? null,
     } as ConversationPreview;
   });
 }

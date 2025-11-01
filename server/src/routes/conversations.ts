@@ -128,24 +128,51 @@ async function resolveTitleAndPeer(me: string, conv: any) {
 
   // 3) Load peer record and use it for both peer info and title fallback
   if (otherIdStr && isValidOid(otherIdStr)) {
+    const projection = {
+      username: 1,
+      phone: 1,
+      email: 1,
+      name: 1,
+      displayName: 1,
+      fullName: 1,
+      firstname: 1,
+      firstName: 1,
+      lastname: 1,
+      lastName: 1,
+      given_name: 1,
+      family_name: 1,
+      avatarUrl: 1,
+      avatar: 1,
+    } as any;
+
+    let userDoc: any = null;
     try {
-      const u = await authDb
+      userDoc = await authDb
         .collection('users')
-        .findOne(
-          { _id: new Types.ObjectId(otherIdStr) },
-          { projection: { username: 1, phone: 1, email: 1, name: 1, displayName: 1, fullName: 1, firstname: 1, firstName: 1, lastname: 1, lastName: 1, given_name: 1, family_name: 1, avatarUrl: 1 } as any }
-        );
-      const name = deriveTitleFromUser(u);
-      peer = {
-        id: otherIdStr,
-        username: u?.username ?? null,
-        phone: u?.phone ?? null,
-        email: u?.email ?? null,
-        name: name ?? null,
-        avatarUrl: u?.avatarUrl ?? null,
-      };
-      if (!title) title = name;
+        .findOne({ _id: new Types.ObjectId(otherIdStr) }, { projection });
     } catch {}
+
+    if (!userDoc || (!userDoc.avatarUrl && !userDoc.avatar)) {
+      try {
+        const alt = await customerDb
+          .collection('users')
+          .findOne({ _id: new Types.ObjectId(otherIdStr) }, { projection });
+        if (alt) {
+          userDoc = { ...alt, ...userDoc };
+        }
+      } catch {}
+    }
+
+    const name = deriveTitleFromUser(userDoc);
+    peer = {
+      id: otherIdStr,
+      username: userDoc?.username ?? null,
+      phone: userDoc?.phone ?? null,
+      email: userDoc?.email ?? null,
+      name: name ?? null,
+      avatarUrl: userDoc?.avatarUrl ?? userDoc?.avatar ?? null,
+    };
+    if (!title) title = name;
   }
 
   return { title: title || null, peer, participants: uniqueParticipants };
@@ -240,7 +267,9 @@ r.get('/', requireAuth as any, async (req: any, res) => {
   const raw = await Conversation.aggregate(pipeline);
   const items = await Promise.all(
     raw.map(async (c: any) => {
-      const { title } = await resolveTitleAndPeer(me, c);
+      const info = await resolveTitleAndPeer(me, c);
+      const title = info.title;
+      const peer = info.peer;
       // Load unread for me (best-effort)
       let unread: number | null = null;
       try {
@@ -261,7 +290,6 @@ r.get('/', requireAuth as any, async (req: any, res) => {
           : lastDoc?.attachment
             ? '[attachment]'
             : null;
-
       return {
         id: String(c._id),
         title: title || 'Conversation',
@@ -273,6 +301,7 @@ r.get('/', requireAuth as any, async (req: any, res) => {
           : Array.isArray(c.participants)
             ? c.participants.map((m: any) => String(m))
             : [],
+        peer,
         unread,
       };
     })
