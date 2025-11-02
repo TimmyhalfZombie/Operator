@@ -67,6 +67,9 @@ router.post('/register', async (req, res, next) => {
       } catch (e) {
         console.log('Reverse geocoding failed:', e);
       }
+      if (!realAddress) {
+        realAddress = `${latNum.toFixed(6)}, ${lngNum.toFixed(6)}`;
+      }
     }
 
     const doc = await users.insertOne({
