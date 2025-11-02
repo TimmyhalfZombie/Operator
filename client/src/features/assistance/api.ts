@@ -1,3 +1,4 @@
+import { tokens } from '../../auth/tokenStore';
 import { api } from '../../lib/http';
 import { AssistanceRequest } from './types';
 
@@ -47,9 +48,18 @@ function normalize(raw: any): AssistanceRequest {
 /** Get newest pending request for the operator. */
 export async function fetchNextAssist(): Promise<AssistanceRequest | null> {
   try {
-    const accepted = await fetchAssistInbox({ status: 'accepted', limit: 1 });
-    if (Array.isArray(accepted) && accepted.length > 0) {
-      return null;
+    const myId = await tokens.getUserIdAsync();
+    if (myId) {
+      const accepted = await fetchAssistInbox({ status: 'accepted', limit: 100 });
+      const hasMyAccepted = Array.isArray(accepted)
+        ? accepted.some((item) => {
+            const owner = item.assignedTo || item.acceptedBy || item.operator?.id;
+            return owner ? String(owner) === String(myId) : false;
+          })
+        : false;
+      if (hasMyAccepted) {
+        return null;
+      }
     }
   } catch (err) {
     // If inbox fetch fails, continue and let /next handle errors

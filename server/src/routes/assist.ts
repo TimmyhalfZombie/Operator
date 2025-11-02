@@ -188,6 +188,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       
       // For completed requests, show the operator who completed it
       if (d.status === 'completed' && d.completedBy) {
+        const operatorUserId = String(d.completedBy);
         try {
           const operator = await customerDb.collection('operators').findOne({ user_id: String(d.completedBy) });
           if (operator) {
@@ -196,6 +197,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
             const lastSeen = operator.last_seen_at;
             
             operatorInfo = {
+              id: operatorUserId,
               name: operator.name || 'Operator',
               location: operator.last_address || operator.initial_address || (lat && lng ? 
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -212,13 +214,15 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       else if (d.assignedTo || d.acceptedBy) {
         try {
           const operatorId = d.assignedTo || d.acceptedBy;
-          const operator = await customerDb.collection('operators').findOne({ user_id: String(operatorId) });
+          const operatorUserId = String(operatorId);
+          const operator = await customerDb.collection('operators').findOne({ user_id: operatorUserId });
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
             const lastSeen = operator.last_seen_at;
             
             operatorInfo = {
+              id: operatorUserId,
               name: operator.name || 'Operator',
               location: operator.last_address || operator.initial_address || (lat && lng ? 
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -258,6 +262,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
         createdAt: d.createdAt || (d as any).created_at || null,
         updatedAt: d.updatedAt || (d as any).updated_at || null,
         assignedTo: d.assignedTo ? String(d.assignedTo) : null,
+        acceptedBy: d.acceptedBy ? String(d.acceptedBy) : null,
         userId: d.userId ? String(d.userId) : null,
         rating: d.rating ?? null,
         completedAt: d.completedAt ?? null,
@@ -349,14 +354,16 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     // Get operator information if available
     let operatorInfo = null;
     if (doc.status === 'completed' && doc.completedBy) {
+      const operatorUserId = String(doc.completedBy);
       try {
-        const operator = await db.collection('operators').findOne({ user_id: String(doc.completedBy) });
+        const operator = await db.collection('operators').findOne({ user_id: operatorUserId });
         if (operator) {
           const lat = operator.last_lat;
           const lng = operator.last_lng;
           const lastSeen = operator.last_seen_at;
           
           operatorInfo = {
+            id: operatorUserId,
             name: operator.name || 'Operator',
             location: operator.last_address || operator.initial_address || (lat && lng ? 
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -372,13 +379,15 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     } else if (doc.assignedTo || doc.acceptedBy) {
       try {
         const operatorId = doc.assignedTo || doc.acceptedBy;
-        const operator = await db.collection('operators').findOne({ user_id: String(operatorId) });
+        const operatorUserId = String(operatorId);
+        const operator = await db.collection('operators').findOne({ user_id: operatorUserId });
         if (operator) {
           const lat = operator.last_lat;
           const lng = operator.last_lng;
           const lastSeen = operator.last_seen_at;
           
           operatorInfo = {
+            id: operatorUserId,
             name: operator.name || 'Operator',
             location: operator.last_address || operator.initial_address || (lat && lng ? 
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -433,6 +442,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       createdAt: doc?.createdAt ?? null,
       updatedAt: doc?.updatedAt ?? null,
       userId: doc?.userId ? String(doc.userId) : null,
+      acceptedBy: doc?.acceptedBy ? String(doc.acceptedBy) : null,
       operator: operatorInfo,
       user: clientInfo,
     };
@@ -463,14 +473,16 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
         
         let operatorInfo = null;
         if (assistDoc.status === 'completed' && assistDoc.completedBy) {
+          const operatorUserId = String(assistDoc.completedBy);
           try {
-            const operator = await db.collection('operators').findOne({ user_id: String(assistDoc.completedBy) });
+            const operator = await db.collection('operators').findOne({ user_id: operatorUserId });
             if (operator) {
               const lat = operator.last_lat;
               const lng = operator.last_lng;
               const lastSeen = operator.last_seen_at;
               
               operatorInfo = {
+                id: operatorUserId,
                 name: operator.name || 'Operator',
                 location: operator.last_address || (lat && lng ? 
                   `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -504,6 +516,7 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
           completedAt: assistDoc?.completedAt ?? null,
           createdAt: assistDoc?.createdAt ?? null,
           updatedAt: assistDoc?.updatedAt ?? null,
+          acceptedBy: assistDoc?.acceptedBy ? String(assistDoc.acceptedBy) : null,
           operator: operatorInfo,
         };
         
@@ -528,14 +541,16 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
           
           let operatorInfo = null;
           if (assistDoc.status === 'completed' && assistDoc.completedBy) {
+            const operatorUserId = String(assistDoc.completedBy);
             try {
-              const operator = await db.collection('operators').findOne({ user_id: String(assistDoc.completedBy) });
+              const operator = await db.collection('operators').findOne({ user_id: operatorUserId });
               if (operator) {
                 const lat = operator.last_lat;
                 const lng = operator.last_lng;
                 const lastSeen = operator.last_seen_at;
                 
                 operatorInfo = {
+                  id: operatorUserId,
                   name: operator.name || 'Operator',
                   location: operator.last_address || (lat && lng ? 
                     `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -568,6 +583,7 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
             completedAt: assistDoc?.completedAt ?? null,
             createdAt: assistDoc?.createdAt ?? null,
             updatedAt: assistDoc?.updatedAt ?? null,
+            acceptedBy: assistDoc?.acceptedBy ? String(assistDoc.acceptedBy) : null,
             operator: operatorInfo,
           };
           
@@ -872,6 +888,7 @@ router.post('/:id/complete', requireAuth, async (req, res, next) => {
         endName,
         endAddr,
 
+        acceptedBy: doc.acceptedBy ? String(doc.acceptedBy) : null,
         rating: doc.rating ?? (rating ?? null),
       },
     });

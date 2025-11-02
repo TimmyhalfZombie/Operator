@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
+import { tokens } from '../auth/tokenStore';
 import { useDeclinedRequests } from '../contexts/DeclinedRequestsContext';
 import { AssistItem, fetchOperatorInbox } from '../lib/activity.api';
 
@@ -8,6 +9,7 @@ const BACKGROUND_MS = 1_000;  // poll every 1s in background
 
 export function useActivity() {
   const [items, setItems] = useState<AssistItem[]>([]);
+  const [myId, setMyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const { declinedIds, markAsDeclined } = useDeclinedRequests();
@@ -73,6 +75,21 @@ export function useActivity() {
     };
   }, [load, schedule]);
 
+  useEffect(() => {
+    let active = true;
+    tokens
+      .getUserIdAsync()
+      .then((id) => {
+        if (active) setMyId(id);
+      })
+      .catch(() => {
+        if (active) setMyId(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
 
   // Split into "New" (pending), "Ongoing" (accepted but not completed), and "Recent" (completed/other)
   // Hide requests that this operator has declined locally, but keep database status as pending
@@ -80,17 +97,32 @@ export function useActivity() {
     items.filter(i => (i.status || 'pending') === 'pending'), [items]
   );
   
-  const ongoingItems = useMemo(() => 
-    items.filter(i => (i.status || 'pending') === 'accepted'), [items]
+  const matchOwner = useCallback(
+    (item: AssistItem | null | undefined): boolean => {
+      if (!item || !myId) return false;
+      const owner = item.operator?.id || item.assignedTo || item.acceptedBy;
+      return owner ? String(owner) === String(myId) : false;
+    },
+    [myId]
   );
 
-  const hasOngoing = useMemo(() => ongoingItems.length > 0, [ongoingItems.length]);
+  const ongoingItems = useMemo(() => {
+    if (!myId) return [];
+    return items.filter((i) => (i.status || 'pending') === 'accepted' && matchOwner(i));
+  }, [items, myId, matchOwner]);
+
+  const hasOngoing = ongoingItems.length > 0;
   
   const filteredNewItems = useMemo(() => hasOngoing ? [] : newItems, [hasOngoing, newItems]);
   
-  const recentItems = useMemo(() => 
-    items.filter(i => (i.status || 'pending') !== 'pending' && (i.status || 'pending') !== 'accepted'), [items]
-  );
+  const recentItems = useMemo(() => {
+    if (!myId) return [];
+    return items.filter((i) => {
+      const status = (i.status || 'pending').toLowerCase();
+      if (status === 'pending' || status === 'accepted') return false;
+      return matchOwner(i);
+    });
+  }, [items, myId, matchOwner]);
 
   return {
     items,
