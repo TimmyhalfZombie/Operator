@@ -11,7 +11,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.1.29:3000"
+        "EXPO_PUBLIC_API_URL": "https://theoperatorapp2.loca.lt"
       }
     },
     "preview": {
@@ -20,7 +20,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.1.29:3000"
+        "EXPO_PUBLIC_API_URL": "https://theoperatorapp2.loca.lt"
       }
     },
     "production": {
