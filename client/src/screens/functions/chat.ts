@@ -5,6 +5,7 @@ import { ActionSheetIOS, Alert, Platform } from 'react-native';
 import { tokens } from '../../auth/tokenStore';
 import { sendMessage } from '../../features/messages/api';
 import { ensureConversationId } from '../../features/messages/ensureConvId';
+import { uploadImageFromUri } from '../../lib/uploads';
 
 // Types
 export type LocalMessage = {
@@ -47,7 +48,8 @@ export function decodeJwtSubFromAccess(): string | null {
 }
 
 export function getMyIdSync(): string {
-  return decodeJwtSubFromAccess() || 'me';
+  const decoded = decodeJwtSubFromAccess();
+  return decoded || 'me';
 }
 
 export function isMyMessage(from: string, myId: string): boolean {
@@ -178,14 +180,15 @@ export async function sendImageMessage(
   onTempMessage(tmp);
 
   try {
-    const saved = await sendMessage(conversationId, '[photo]');
+    const remoteUrl = await uploadImageFromUri(uri, 'app/messages');
+    const saved = await sendMessage(conversationId, '', meId, remoteUrl);
     const realId = (saved?.id ?? '').toString();
 
     if (realId) {
-      await saveAttachment(conversationId, realId, uri);
+      await saveAttachment(conversationId, realId, remoteUrl);
     }
 
-    onUpdateMessage(tmpId, saved, uri);
+    onUpdateMessage(tmpId, saved, remoteUrl);
   } catch (error) {
     console.error('Failed to send image message:', error);
     onError(tmpId);
@@ -224,7 +227,7 @@ export async function sendTextMessage(
       throw new Error('Cannot connect to server. Please check your network connection.');
     }
     
-    const saved = await sendMessage(conversationId, text);
+    const saved = await sendMessage(conversationId, text, meId);
     console.log('Message sent successfully:', saved);
     onUpdateMessage(tmpId, saved);
   } catch (error) {

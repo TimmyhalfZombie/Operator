@@ -6,7 +6,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   ActivityIndicator,
+  Alert,
   BackHandler,
+  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -23,13 +25,13 @@ import ImageViewing from 'react-native-image-viewing';
 
 import { tokens } from '../auth/tokenStore';
 import { SocketContext } from '../contexts/SocketProvider';
-import {
-  fetchMessages,
-  getConversation
-} from '../features/messages/api';
+import { deleteMessage, fetchMessages, getConversation } from '../features/messages/api';
 import { ensureConversationId } from '../features/messages/ensureConvId';
+import { fetchMe } from '../lib/api';
 import {
   LocalMessage,
+  getMyIdSync,
+  isMyMessage,
   loadAttachmentsMap,
   openAttachmentPicker,
   pickFromCamera,
@@ -38,11 +40,18 @@ import {
   sendTextMessage,
 } from './functions/chat';
 
-const BG = '#0E0E0E';
+const BG = '#E7FFE9';
+const CONTROL_BG = '#DAFFD1';
 const MINE_BG = '#6EFF87';
+const HEADER_BG = '#0C0C0C';
 const TEXT_DARK = '#0C0C0C';
 const TEXT_LIGHT = '#EDEDED';
 const BORDER = '#262626';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const BUBBLE_MAX_WIDTH = SCREEN_WIDTH * 0.9;
+const BUBBLE_MIN_WIDTH_BASE = 36;
+const BUBBLE_MIN_WIDTH_PER_CHAR = 6;
 
 // Local wrappers to default all text on this screen to Inter (boldy)
 function Text(props: TextProps) {
@@ -52,16 +61,41 @@ function TextInput(props: TextInputProps) {
   return <RNTextInput {...props} style={[{ fontFamily: 'Inter-Bold' }, props.style]} />;
 }
 
+function normalizeMessageText(val: string): string {
+  const collapsed = String(val ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
+  if (!collapsed) return '';
+  const lower = collapsed.toLowerCase();
+  if (lower === '[photo]' || lower === '[attachment]') {
+    return '';
+  }
+  const tokens = collapsed.split(' ');
+  if (tokens.length > 1 && tokens.every((tok) => tok.length === 1)) {
+    return tokens.join('');
+  }
+  return collapsed;
+}
+
+function computeBubbleMinWidth(text?: string | null, hasImage?: boolean): number {
+  if (hasImage) return BUBBLE_MIN_WIDTH_BASE;
+  const trimmed = String(text ?? '').trim();
+  const len = trimmed.length;
+  if (!len) return BUBBLE_MIN_WIDTH_BASE;
+  const estimate = BUBBLE_MIN_WIDTH_BASE + len * BUBBLE_MIN_WIDTH_PER_CHAR;
+  const clamped = Math.min(BUBBLE_MAX_WIDTH, Math.max(BUBBLE_MIN_WIDTH_BASE, estimate));
+  return clamped;
+}
+
 export default function ChatScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id?: string; peerUserId?: string; requestId?: string }>();
+  const params = useLocalSearchParams<{ id?: string; peerUserId?: string; requestId?: string; name?: string }>();
   const initialId = String(params?.id ?? '');
+  const initialTitle = typeof params?.name === 'string' && params.name.trim() ? params.name.trim() : 'Chat';
   const insets = useSafeAreaInsets();
   const { socket } = React.useContext(SocketContext);
 
   const [conversationId, setConversationId] = React.useState<string>(initialId);
-  const [meId, setMeId] = React.useState<string | null>(null);
-  const [title, setTitle] = React.useState<string>('Chat');
+  const [title, setTitle] = React.useState<string>(initialTitle);
+  const [myId, setMyId] = React.useState<string>(getMyIdSync() || 'me');
   const [loading, setLoading] = React.useState(true);
 
   // NEWEST first (DESC) for inverted FlatList
@@ -71,16 +105,77 @@ export default function ChatScreen() {
   // Persisted local attachments (messageId -> uri)
   const [attachMap, setAttachMap] = React.useState<Record<string, string>>({});
 
+  React.useEffect(() => {
+    if (typeof params?.name === 'string' && params.name.trim()) {
+      setTitle(params.name.trim());
+    }
+  }, [params?.name]);
+
+  React.useEffect(() => {
+    if (!conversationId || conversationId === 'new') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await getConversation(conversationId);
+        const resolvedTitle = info?.title?.trim?.();
+        if (
+          !cancelled &&
+          resolvedTitle &&
+          resolvedTitle.toLowerCase() !== 'conversation' &&
+          resolvedTitle.toLowerCase() !== 'chat'
+        ) {
+          setTitle(resolvedTitle);
+        }
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
+
   // Lightbox (zoomable) state
   const [viewerUri, setViewerUri] = React.useState<string | null>(null);
+
+  const messagesRef = React.useRef<LocalMessage[]>([]);
+  const attachRef = React.useRef<Record<string, string>>({});
+
+  React.useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  React.useEffect(() => {
+    attachRef.current = attachMap;
+  }, [attachMap]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const meInfo = await fetchMe();
+        if (!cancelled && meInfo?.id) {
+          setMyId(String(meInfo.id));
+        }
+      } catch {}
+      try {
+        if ((tokens as any)?.waitUntilReady) {
+          await (tokens as any).waitUntilReady();
+        }
+        const asyncId = await tokens.getUserIdAsync?.();
+        if (!cancelled && asyncId) {
+          setMyId(String(asyncId));
+        }
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // 0) Resolve/ensure a real conversation id if we arrived as "new"
   React.useEffect(() => {
     let cancelled = false;
-
     (async () => {
       const rawId = initialId?.trim();
-      // If the id is missing/placeholder, resolve it using peerUserId or requestId
       if (!rawId || rawId === 'new') {
         const resolved = await ensureConversationId(undefined, {
           peerUserId: typeof params?.peerUserId === 'string' ? params.peerUserId : undefined,
@@ -88,51 +183,43 @@ export default function ChatScreen() {
         });
         if (!cancelled && resolved) {
           setConversationId(resolved);
-          // Replace the route param silently so any future navigations reuse the real id
           try {
-            router.replace({ pathname: '/(tabs)/chat/[id]', params: { id: resolved } });
+            const nameParam = typeof params?.name === 'string' && params.name.trim() ? params.name.trim() : undefined;
+            const nextParams: Record<string, string> = { id: resolved };
+            if (nameParam) nextParams.name = nameParam;
+            router.replace({ pathname: '/(tabs)/chat/[id]', params: nextParams });
           } catch {}
         }
       } else {
         setConversationId(rawId);
       }
     })();
-
     return () => { cancelled = true; };
-    // only on first mount or when incoming params change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialId, params?.peerUserId, params?.requestId]);
 
-  // 1) Load current user id from JWT
+  // 1) Derive title via socket: verifyConversationParticipants → pick the "other" name
   React.useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const uid = await tokens.getUserIdAsync();
-      if (mounted) setMeId(uid ?? null);
-    })();
-    return () => { mounted = false; };
-  }, []);
-
-  // 2) Load conversation meta (for title/peer) once we have a real id
-  React.useEffect(() => {
-    if (!conversationId || conversationId === 'new') return;
-    let mounted = true;
-    (async () => {
+    if (!socket || !conversationId || conversationId === 'new') return;
+    const onReply = (res: any) => {
+      if (!res?.success) return;
       try {
-        const conv = await getConversation(conversationId);
-        if (mounted) {
-          const t =
-            conv?.peer?.name ||
-            conv?.peer?.username ||
-            conv?.peer?.phone ||
-            conv?.title ||
-            'Chat';
-          setTitle(t);
+        const myCandidate = myId && myId !== 'me' ? String(myId) : String((socket as any).user?.id ?? '');
+        const me = myCandidate || '';
+        const others = (res.data?.participants || []).filter((p: any) => String(p._id) !== me);
+        const peer = others[0];
+        const t = peer?.name || peer?.username || peer?.email || 'Conversation';
+        if (t && t.toLowerCase() !== 'conversation' && t.toLowerCase() !== 'chat') {
+          setTitle(String(t));
         }
       } catch {}
-    })();
-    return () => { mounted = false; };
-  }, [conversationId]);
+    };
+    socket.once('verifyConversationParticipants', onReply);
+    socket.emit('verifyConversationParticipants', conversationId);
+    return () => {
+      socket.off('verifyConversationParticipants', onReply);
+    };
+  }, [socket, conversationId, myId]);
 
   // Android hardware back: go to Messages tab
   React.useEffect(() => {
@@ -143,50 +230,63 @@ export default function ChatScreen() {
     return () => sub.remove();
   }, [router]);
 
-  // 3) Real-time socket listeners for database changes (after id exists)
+  // 2) Real-time: listen for newMessage broadcasts (server sends newest first)
   React.useEffect(() => {
     if (!socket || !conversationId || conversationId === 'new') return;
 
-    const handleConversationDeleted = (data: { conversationId: string }) => {
-      if (data.conversationId === conversationId) {
-        router.replace('/(tabs)/messages');
+    const handleNewMessage = (evt: any) => {
+      if (!evt?.success || !evt?.data) return;
+      const m = evt.data;
+      if (String(m?.conversationId) !== String(conversationId)) return;
+
+      const fromMe = isMyMessage(String(m?.senderId?._id || m?.senderId), myId || 'me');
+      if (fromMe) {
+        return;
       }
+
+      const createdAt = new Date(m.createdAt ?? Date.now()).toISOString();
+      const local: LocalMessage = {
+        id: String(m._id),
+        conversationId: String(m.conversationId),
+        from: String(m.senderId?._id || m.senderId),
+        text: normalizeMessageText(String(m.content ?? '')),
+        imageUri: attachMap[String(m._id)] || (m.attachment ? String(m.attachment) : null),
+        createdAt,
+      };
+
+      setMessages((prev) => {
+        const exists = prev.some((x) => x.id === local.id);
+        if (exists) {
+          return prev.map((x) => (x.id === local.id ? { ...local, pending: false, failed: false } : x));
+        }
+
+        return [local, ...prev].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+      });
     };
 
-    const handleMessageDeleted = (data: { messageId: string; conversationId: string }) => {
-      if (data.conversationId === conversationId) {
-        setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
-      }
+    const handleDeletedMessage = (evt: any) => {
+      if (!evt?.success) return;
+      const msgId = String(evt?.messageId || evt?.id || '');
+      const convId = String(evt?.conversationId || evt?.conversation_id || '');
+      if (!msgId || convId !== String(conversationId)) return;
+      setMessages((prev) => prev.filter((m) => m.id !== msgId));
+      setAttachMap((prev) => {
+        if (!prev[msgId]) return prev;
+        const next = { ...prev };
+        delete next[msgId];
+        return next;
+      });
     };
 
-    const handleNewMessage = (data: { message: any; conversationId: string }) => {
-      if (data.conversationId === conversationId) {
-        const newMessage: LocalMessage = {
-          ...data.message,
-          imageUri: attachMap[data.message.id] || null,
-        };
-        setMessages(prev => {
-          const exists = prev.some(msg => msg.id === newMessage.id);
-          if (exists) return prev;
-          return [newMessage, ...prev].sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-        });
-      }
-    };
-
-    socket.on('conversation:deleted', handleConversationDeleted);
-    socket.on('message:deleted', handleMessageDeleted);
-    socket.on('message:created', handleNewMessage);
-
+    socket.on('newMessage', handleNewMessage);
+    socket.on('message:deleted', handleDeletedMessage);
     return () => {
-      socket.off('conversation:deleted', handleConversationDeleted);
-      socket.off('message:deleted', handleMessageDeleted);
-      socket.off('message:created', handleNewMessage);
+      socket.off('newMessage', handleNewMessage);
+      socket.off('message:deleted', handleDeletedMessage);
     };
-  }, [socket, conversationId, router, attachMap]);
+  }, [socket, conversationId, attachMap, myId]);
 
-  // 4) Load attachments map first, then messages (so we can enrich with imageUri on first render)
+  // 3) Load attachments first, then messages
   React.useEffect(() => {
     if (!conversationId || conversationId === 'new') return;
     let mounted = true;
@@ -200,13 +300,14 @@ export default function ChatScreen() {
         const items = await fetchMessages(conversationId);
         if (!mounted) return;
 
-        const sortedDesc = [...items].sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-
+        const sortedDesc = [...items].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
         const enriched: LocalMessage[] = sortedDesc.map((m) => ({
-          ...m,
-          imageUri: map[m.id] ?? null,
+          id: m.id,
+          conversationId: m.conversationId,
+          from: String(m.from),
+          text: m.text,
+          createdAt: m.createdAt,
+          imageUri: map[m.id] ?? m.attachment ?? null,
         }));
         setMessages(enriched);
       } finally {
@@ -216,66 +317,117 @@ export default function ChatScreen() {
     return () => { mounted = false; };
   }, [conversationId]);
 
+  React.useEffect(() => {
+    if (!conversationId || conversationId === 'new') return;
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      try {
+        const items = await fetchMessages(conversationId);
+        if (cancelled) return;
+        const normalized = items.map((m) => {
+          const mine = isMyMessage(String(m.from), myId || 'me');
+          return {
+            id: m.id,
+            conversationId: m.conversationId,
+            from: mine ? myId || 'me' : String(m.from),
+            text: normalizeMessageText(m.text ?? ''),
+            createdAt: m.createdAt,
+            imageUri: attachMap[m.id] ?? m.attachment ?? null,
+            pending: false,
+            failed: false,
+          } as LocalMessage;
+        });
+
+        normalized.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+        setMessages((prev) => {
+          const fetchedIds = new Set(normalized.map((m) => m.id));
+          const pending = prev.filter((m) => m.pending || m.failed);
+          const combined = [...normalized];
+          pending.forEach((msg) => {
+            if (!fetchedIds.has(msg.id)) combined.push(msg);
+          });
+          return combined.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+        });
+      } catch {}
+
+      if (!cancelled) timeout = setTimeout(poll, 500);
+    };
+
+    timeout = setTimeout(poll, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [conversationId, attachMap, myId]);
+
   async function handleSend() {
-    const text = input.trim();
-    if (!text || !meId) return;
-    if (!conversationId || conversationId === 'new') {
-      // no valid conversation id yet
-      return;
-    }
-
+    const raw = input.trim();
+    if (!raw || !conversationId || conversationId === 'new') return;
+    const text = normalizeMessageText(raw);
     setInput('');
-
     await sendTextMessage(
       conversationId,
-      meId,
+      myId || 'me',
       text,
-      (msg) => setMessages((prev) => [msg, ...prev]),
+      (msg) => setMessages((prev) => [
+        { ...msg, from: myId || 'me', text },
+        ...prev,
+      ]),
       (tmpId, saved) => {
         setMessages((prev) => {
           const idx = prev.findIndex((m) => m.id === tmpId);
+          const normalized = {
+            ...(saved as LocalMessage),
+            from: myId || 'me',
+            text,
+            pending: false,
+            failed: false,
+          };
           if (idx >= 0) {
             const next = [...prev];
-            next[idx] = { ...(saved as LocalMessage), pending: false };
-            next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            return next;
+            next[idx] = normalized;
+            return next.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
           }
-          return [saved as LocalMessage, ...prev].sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
+          return [normalized, ...prev].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
         });
       },
       (tmpId) => {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tmpId ? { ...m, pending: false, failed: true } : m))
-        );
+        setMessages((prev) => prev.map((m) => (m.id === tmpId ? { ...m, pending: false, failed: true } : m)));
       }
     );
   }
 
   // ---- Attachments ----
   async function handleCamera() {
-    if (!conversationId || conversationId === 'new' || !meId) return;
+    if (!conversationId || conversationId === 'new') return;
     const uri = await pickFromCamera();
     if (uri) {
       await sendImageMessage(
         conversationId,
-        meId,
+        myId || 'me',
         uri,
-        (msg) => setMessages((prev) => [msg, ...prev]),
+        (msg) => setMessages((prev) => [
+          { ...msg, from: myId || 'me' },
+          ...prev,
+        ]),
         (tmpId, saved, imageUri) => {
           setAttachMap((m) => ({ ...m, [saved.id]: imageUri }));
           setMessages((prev) => {
             const idx = prev.findIndex((m) => m.id === tmpId);
+            const normalized = {
+              ...(saved as LocalMessage),
+              from: myId || 'me',
+              text: saved.text,
+              imageUri,
+              pending: false,
+              failed: false,
+            };
             if (idx < 0) return prev;
             const next = [...prev];
-            next[idx] = {
-              ...(saved as LocalMessage),
-              imageUri,
-              text: '',
-              pending: false,
-            };
-            next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            next[idx] = normalized;
+            next.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
             return next;
           });
         },
@@ -287,27 +439,33 @@ export default function ChatScreen() {
   }
 
   async function handleLibrary() {
-    if (!conversationId || conversationId === 'new' || !meId) return;
+    if (!conversationId || conversationId === 'new') return;
     const uri = await pickFromLibrary();
     if (uri) {
       await sendImageMessage(
         conversationId,
-        meId,
+        myId || 'me',
         uri,
-        (msg) => setMessages((prev) => [msg, ...prev]),
+        (msg) => setMessages((prev) => [
+          { ...msg, from: myId || 'me' },
+          ...prev,
+        ]),
         (tmpId, saved, imageUri) => {
           setAttachMap((m) => ({ ...m, [saved.id]: imageUri }));
           setMessages((prev) => {
             const idx = prev.findIndex((m) => m.id === tmpId);
+            const normalized = {
+              ...(saved as LocalMessage),
+              from: myId || 'me',
+              text: saved.text,
+              imageUri,
+              pending: false,
+              failed: false,
+            };
             if (idx < 0) return prev;
             const next = [...prev];
-            next[idx] = {
-              ...(saved as LocalMessage),
-              imageUri,
-              text: '',
-              pending: false,
-            };
-            next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            next[idx] = normalized;
+            next.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
             return next;
           });
         },
@@ -318,13 +476,51 @@ export default function ChatScreen() {
     }
   }
 
+  const handleMessageLongPress = React.useCallback(
+    (msg: LocalMessage) => {
+      if (!conversationId || conversationId === 'new') return;
+      Alert.alert('Delete message', 'Remove this message?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const prevMessages = messagesRef.current;
+            const prevAttach = attachRef.current;
+
+            setMessages((current) => current.filter((m) => m.id !== msg.id));
+            setAttachMap((current) => {
+              if (!current[msg.id]) return current;
+              const next = { ...current };
+              delete next[msg.id];
+              return next;
+            });
+
+            if (msg.pending || msg.failed || msg.id.startsWith('tmp_')) return;
+
+            try {
+              await deleteMessage(conversationId, msg.id);
+            } catch (err) {
+              console.warn('deleteMessage failed', err);
+              setMessages(prevMessages);
+              setAttachMap(prevAttach);
+              Alert.alert('Delete failed', 'Unable to delete message.');
+            }
+          },
+        },
+      ]);
+    },
+    [conversationId]
+  );
+
   const renderItem = ({ item }: { item: LocalMessage }) => {
-    const isMine = meId && item.from === meId;
+    const mine = isMyMessage(String(item.from), myId || 'me');
     return (
       <MessageBubble
         msg={item}
-        isMine={!!isMine}
+        isMine={!!mine}
         onImagePress={(uri) => setViewerUri(uri)}
+        onLongPress={mine ? () => handleMessageLongPress(item) : undefined}
       />
     );
   };
@@ -334,10 +530,8 @@ export default function ChatScreen() {
       style={styles.container}
       behavior={Platform.select({ ios: 'padding', android: undefined })}
     >
-      {/* Status bar: black icons over your green header */}
-      <StatusBar style="dark" translucent backgroundColor="transparent" />
+      <StatusBar style="light" translucent backgroundColor="transparent" />
 
-      {/* Header (green extends under status bar; content sits below it) */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerBar}>
           <TouchableOpacity
@@ -347,7 +541,7 @@ export default function ChatScreen() {
             style={styles.backBtn}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Icons.ArrowLeft size={22} color={TEXT_DARK} weight="bold" />
+            <Icons.ArrowLeft size={22} color={MINE_BG} weight="bold" />
           </TouchableOpacity>
 
           <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
@@ -355,7 +549,6 @@ export default function ChatScreen() {
         </View>
       </View>
 
-      {/* Messages */}
       <View style={styles.listWrap}>
         {loading ? (
           <View style={styles.center}><ActivityIndicator /></View>
@@ -372,7 +565,6 @@ export default function ChatScreen() {
         )}
       </View>
 
-      {/* Input + Attachment */}
       <View style={styles.inputBar}>
         <TouchableOpacity
           onPress={() => openAttachmentPicker(handleCamera, handleLibrary)}
@@ -395,7 +587,6 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Zoomable image viewer */}
       <ImageViewing
         images={viewerUri ? [{ uri: viewerUri }] : []}
         imageIndex={0}
@@ -412,25 +603,36 @@ function MessageBubble({
   msg,
   isMine,
   onImagePress,
+  onLongPress,
 }: {
   msg: LocalMessage;
   isMine: boolean;
   onImagePress: (uri: string) => void;
+  onLongPress?: () => void;
 }) {
   const hasImage = !!msg.imageUri;
+  const minWidth = computeBubbleMinWidth(msg.text, hasImage);
 
   return (
     <View style={[styles.row, isMine ? styles.rowMine : styles.rowTheirs]}>
-      <View
-        style={[
-          styles.bubble,
-          isMine ? styles.bubbleMine : styles.bubbleTheirs,
-          hasImage && styles.bubbleImage,
-        ]}
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onLongPress={onLongPress}
+        delayLongPress={250}
       >
+        <View
+          style={[
+            styles.bubble,
+            isMine ? styles.bubbleMine : styles.bubbleTheirs,
+            hasImage && styles.bubbleImage,
+            { minWidth },
+          ]}
+        >
         {hasImage ? (
           <TouchableOpacity activeOpacity={0.9} onPress={() => msg.imageUri && onImagePress(msg.imageUri)}>
-            <Image source={{ uri: msg.imageUri! }} style={styles.image} resizeMode="cover" />
+            <View style={styles.imageContainer}>
+              <Image source={{ uri: msg.imageUri! }} style={styles.image} resizeMode="cover" />
+            </View>
           </TouchableOpacity>
         ) : null}
 
@@ -445,7 +647,8 @@ function MessageBubble({
         ) : msg.failed ? (
           <Text style={[styles.meta, { color: '#ff6b6b' }]}>Failed</Text>
         ) : null}
-      </View>
+        </View>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -456,7 +659,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
 
   header: {
-    backgroundColor: MINE_BG,
+    backgroundColor: HEADER_BG,
   },
   headerBar: {
     height: HEADER_CONTENT_HEIGHT,
@@ -476,7 +679,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    color: TEXT_DARK,
+    color: '#6EFF87',
     fontSize: 18,
     fontFamily: 'Inter-Black',
     marginTop: 2,
@@ -492,31 +695,61 @@ const styles = StyleSheet.create({
   rowTheirs: { justifyContent: 'flex-start' },
 
   bubble: {
-    maxWidth: '78%',
-    paddingHorizontal: 12,
+    maxWidth: BUBBLE_MAX_WIDTH,
+    minWidth: BUBBLE_MIN_WIDTH_BASE,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 14,
-    gap: 6,
   },
-  bubbleMine: { backgroundColor: MINE_BG, borderTopRightRadius: 4 },
-  bubbleTheirs: { backgroundColor: '#1C1C1C', borderTopLeftRadius: 4 },
+  bubbleMine: {
+    backgroundColor: MINE_BG,
+    borderTopRightRadius: 4,
+    alignSelf: 'flex-end',
+    borderWidth: 0.5,
+    borderColor: '#000000',
+  },
+  bubbleTheirs: {
+    backgroundColor: '#222020ff',
+    borderTopLeftRadius: 4,
+    borderWidth: 0.5,
+    borderColor: '#000000',
+  },
 
   bubbleImage: {
     backgroundColor: 'transparent',
     paddingHorizontal: 0,
     paddingVertical: 0,
     borderRadius: 0,
+    borderWidth: 0,
+    alignItems: 'flex-end',
   },
 
-  msgText: { fontSize: 15, lineHeight: 20, fontFamily: 'Inter-Bold' },
-  msgMine: { color: TEXT_DARK, textAlign: 'left' },
-  msgTheirs: { color: TEXT_LIGHT, textAlign: 'left' },
+  imageContainer: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    maxWidth: BUBBLE_MAX_WIDTH * 0.6,
+  },
 
   image: {
-    width: 220,
-    height: 220,
-    borderRadius: 12,
+    width: '100%',
+    aspectRatio: 1,
     backgroundColor: 'transparent',
+  },
+
+  msgText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontFamily: 'Inter-Regular',
+  },
+
+  msgMine: {
+    color: TEXT_DARK,
+    textAlign: 'left',
+  },
+
+  msgTheirs: {
+    color: '#FFFFFF',
+    textAlign: 'left',
   },
 
   meta: { marginTop: 4, fontSize: 11, opacity: 0.8, fontFamily: 'Inter-Bold' },
@@ -530,16 +763,19 @@ const styles = StyleSheet.create({
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: BORDER,
+    marginBottom: 10,
+    paddingBottom: 20,
   },
   attachBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#C0FFCB',
-    borderWidth: 2,
+    backgroundColor: CONTROL_BG,
+    borderWidth: 1,
     borderColor: '#000000ff',
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 3,
   },
   input: {
     flex: 1,
@@ -548,17 +784,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: '#151515',
-    color: TEXT_LIGHT,
+    backgroundColor: CONTROL_BG,
+    color: TEXT_DARK,
     fontSize: 15,
     fontFamily: 'Inter-Bold',
+    borderWidth: 1,
+    borderColor: '#000000ff',
   },
   sendBtn: {
     width: 44,
     height: 44,
-    borderRadius: 10,
-    backgroundColor: '#C0FFCB',
+    borderRadius: 22,
+    backgroundColor: CONTROL_BG,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#000000',
+    marginBottom: 3,
   },
 });

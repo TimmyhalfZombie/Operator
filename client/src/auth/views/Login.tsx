@@ -177,11 +177,11 @@ export default function LoginView({ values, onChange, onSignIn, onSignUp, onForg
       <View style={styles.form}>
         {!!error && <Text style={styles.errorText}>{error}</Text>}
 
-        <Text style={styles.label}>Email or Phone</Text>
+        <Text style={styles.label}>Phone or Email</Text>
         <HighlightInput
           value={values.identifier}
           onChangeText={(t) => onChange('identifier', t)}
-          placeholder="Email or Phone"
+          placeholder="Phone or Email"
           keyboardType="email-address"
           autoCapitalize="none"
           state={idState}

@@ -1,9 +1,11 @@
+import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import DeclineConfirmationModal from '../../../components/DeclineConfirmationModal';
 import GeoapifyMap from '../../../components/GeoapifyMap';
 import { useDeclinedRequests } from '../../../contexts/DeclinedRequestsContext';
+import { updateMyLocationOnServer } from '../../../lib/operator.api';
 import { acceptAssist } from '../../assistance/api'; // 🔹 use the updated accept
 import useAcceptedJobUI from '../../useAcceptedJobUI';
 import { useNextAssist } from '../../useNextRequest';
@@ -59,11 +61,28 @@ export default function RequestAssistanceScreen() {
     setAcceptedCoords(data.coords);
 
     try {
+      // Try to capture current coordinates and post to server before accept (await once)
+      try {
+        let perm = await Location.getForegroundPermissionsAsync();
+        if (!perm.granted) perm = await Location.requestForegroundPermissionsAsync();
+        if (perm.granted) {
+          const pos = await Promise.race([
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+            new Promise<never>((_, rej) => setTimeout(() => rej(new Error('loc-timeout')), 7000)),
+          ]);
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          // Await once to reduce race with first map poll
+          await updateMyLocationOnServer({ lat, lng });
+        }
+      } catch {}
+
       // 🔹 Call accept and get the shared conversationId from the server
       const res = await acceptAssist(data.id);
       if (res?.ok && res?.conversationId) {
         // 🔹 Navigate operator into the shared chat room immediately
-        router.push(`/ (tabs)/chat/${res.conversationId}`.replace(/\s+/g, ''));
+        const displayName = data.clientName || 'Client';
+        router.push({ pathname: '/(tabs)/chat/[id]', params: { id: String(res.conversationId), name: displayName } });
       } else {
         // no conv id yet; UI remains accepted (can still Message via ensure endpoint)
       }

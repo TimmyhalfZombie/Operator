@@ -1,148 +1,299 @@
 import { Router } from 'express';
-import { getCustomerDb } from '../db/connect';
+import { ObjectId } from 'mongodb';
+import { getAuthDb } from '../db/connect';
 import { requireAuth } from '../middleware/requireAuth';
 
 const router = Router();
 
-/**
- * GET /api/users/me/location
- * Returns { lat, lng, address, updated_at }
- * Gets operator location from operators collection
- */
-router.get('/users/me/location', requireAuth, async (req: any, res) => {
+/** Normalize outgoing user fields (returns both snake_case and camelCase) */
+function toPublicUser(u: any) {
+  if (!u) return null;
+  const userObj = u as Record<string, any>;
+
+  const initial_lat =
+    userObj.initial_lat ??
+    userObj.initialLat ??
+    userObj.location?.initial_lat ??
+    userObj.location?.initialLat ??
+    userObj.lat ??
+    userObj.location?.lat ??
+    null;
+
+  const initial_long =
+    userObj.initial_long ??
+    userObj.initialLong ??
+    userObj.initial_lng ??
+    userObj.initialLng ??
+    userObj.location?.initial_long ??
+    userObj.location?.initialLong ??
+    userObj.location?.initial_lng ??
+    userObj.location?.initialLng ??
+    userObj.lng ??
+    userObj.location?.lng ??
+    null;
+
+  const initial_address =
+    userObj.initial_address ??
+    userObj.initialAddress ??
+    userObj.location?.initial_address ??
+    userObj.location?.initialAddress ??
+    userObj.address ??
+    userObj.location?.address ??
+    null;
+
+  const composedName = [userObj.firstName, userObj.lastName].filter(Boolean).join(' ').trim() || null;
+  const name = userObj.name ?? composedName ?? null;
+  const phone =
+    userObj.phone ??
+    userObj.phoneNumber ??
+    userObj.customerPhone ??
+    userObj.contactPhone ??
+    userObj.mobile ??
+    userObj.tel ??
+    null;
+  const email = userObj.email ?? userObj.contactEmail ?? userObj.username ?? null;
+  const username = userObj.username ?? name ?? email ?? null;
+
+  return {
+    _id: String(userObj._id ?? userObj.id ?? ''),
+    name,
+    username,
+    email,
+    phone,
+    avatar: userObj.avatar ?? null,
+
+    // canonical snake_case
+    initial_lat,
+    initial_long,
+    initial_address,
+
+    // mirrors (camelCase)
+    initialLat: initial_lat,
+    initialLong: initial_long,
+    initialAddress: initial_address,
+
+    // latest (if you store them)
+    lat: userObj.lat ?? userObj.location?.lat ?? userObj.last_lat ?? null,
+    lng: userObj.lng ?? userObj.location?.lng ?? userObj.last_lng ?? userObj.last_long ?? null,
+    address: userObj.address ?? userObj.location?.address ?? userObj.last_address ?? null,
+
+    updated_at:
+      userObj.updated_at ??
+      userObj.updatedAt ??
+      userObj.location?.updated_at ??
+      userObj.location?.updatedAt ??
+      userObj.last_seen_at ??
+      userObj.initial_loc_at ??
+      null,
+  };
+}
+
+async function usersColl() {
+  const db = await getAuthDb(); // <-- appdb
+  return db.collection('users');
+}
+
+function idFilter(id: string): Record<string, any> {
+  return ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  GET /me – return my profile (incl. initial_* fields)                      */
+/*  Mount under /api/users and/or /api/operator                               */
+/* -------------------------------------------------------------------------- */
+router.get('/me', requireAuth, async (req: any, res) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+    const uid = String(req.user?.id ?? req.user?._id ?? '');
+    if (!uid) return res.status(401).json({ message: 'unauthorized' });
 
-    const db = getCustomerDb();
-    const operator = await db.collection('operators').findOne({ user_id: String(userId) });
+    const coll = await usersColl();
+    const doc = await coll.findOne(idFilter(uid) as any);
+    if (!doc) return res.status(404).json({ message: 'User not found' });
 
-    if (!operator) return res.status(404).json({ error: 'location not found' });
-    
-    return res.json({
-      lat: operator.last_lat || null,
-      lng: operator.last_lng || null,
-      address: operator.last_address || null,
-      updated_at: operator.last_seen_at || null
-    });
-  } catch (err) {
-    console.error('GET /users/me/location failed', err);
-    return res.status(500).json({ error: 'failed to read location' });
+    return res.json(toPublicUser(doc));
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message ?? 'Failed to load profile' });
   }
 });
 
-/**
- * POST /api/users/me/location
- * Updates operator location with lat, lng, and full address
- */
-router.post('/users/me/location', requireAuth, async (req: any, res) => {
+/* -------------------------------------------------------------------------- */
+/*  GET /:id – public profile (incl. initial_* fields)                        */
+/* -------------------------------------------------------------------------- */
+router.get('/:id', requireAuth, async (req: any, res) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+    const id = String(req.params.id);
+    const coll = await usersColl();
+    const doc = await coll.findOne(idFilter(id) as any);
+    if (!doc) return res.status(404).json({ message: 'User not found' });
 
-    const { lat, lng, address } = req.body;
-    
-    if (!lat || !lng) {
-      return res.status(400).json({ error: 'lat and lng are required' });
-    }
+    return res.json(toPublicUser(doc));
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message ?? 'Failed to load user' });
+  }
+});
 
-    const latNum = Number(lat);
-    const lngNum = Number(lng);
-    
-    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
-      return res.status(400).json({ error: 'Invalid lat/lng values' });
-    }
+/* -------------------------------------------------------------------------- */
+/*  GET /me/location – normalized lat/lng/address                             */
+/*  Prefers last_* then falls back to initial_*                                */
+/*  Returns 200 with nulls if missing (friendlier to client)                  */
+/* -------------------------------------------------------------------------- */
+router.get('/me/location', requireAuth, async (req: any, res) => {
+  try {
+    const uid = String(req.user?.id ?? req.user?._id ?? '');
+    if (!uid) return res.status(401).json({ message: 'unauthorized' });
 
-    const updatedAt = new Date();
-
-    // Geocode coordinates to get real address if not provided
-    let realAddress = address;
-    if (!address) {
-      try {
-        const { reverseGeocode } = await import('./geo');
-        const geocodedAddress = await reverseGeocode(latNum, lngNum);
-        if (geocodedAddress) {
-          realAddress = geocodedAddress;
-        }
-      } catch (e) {
-        console.log('Reverse geocoding failed:', e);
-      }
-    }
-
-    // Update operators collection in customer DB
-    const db = getCustomerDb();
-    await db.collection('operators').updateOne(
-      { user_id: String(userId) },
+    const coll = await usersColl();
+    const user = await coll.findOne(
+      idFilter(uid) as any,
       {
-        $set: {
-          user_id: String(userId),
-          last_lat: latNum,
-          last_lng: lngNum,
-          last_address: realAddress || null,
-          last_seen_at: updatedAt,
-          accuracy_m: 50,
-          source: 'device',
+        projection: {
+          last_lat: 1,
+          last_lng: 1,
+          last_long: 1,
+          last_address: 1,
+          last_seen_at: 1,
+          initial_lat: 1,
+          initial_lng: 1,
+          initial_long: 1,
+          inital_lat: 1,    // tolerate misspelling
+          inital_long: 1,   // tolerate misspelling
+          initial_address: 1,
+          initial_loc_at: 1,
+          location: 1,
+          address: 1,
+          lat: 1,
+          lng: 1,
         },
-      },
-      { upsert: true }
+      }
     );
 
-    res.json({ 
-      success: true, 
-      lat: latNum, 
-      lng: lngNum, 
-      address: realAddress || null,
-      updated_at: updatedAt 
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const lat =
+      user.last_lat ??
+      user.lat ??
+      user.location?.lat ??
+      user.initial_lat ??
+      user.inital_lat ??
+      null;
+
+    const lng =
+      user.last_lng ??
+      user.last_long ??
+      user.lng ??
+      user.location?.lng ??
+      user.initial_lng ??
+      user.initial_long ??
+      user.inital_long ??
+      null;
+
+    const address =
+      user.last_address ??
+      user.address ??
+      user.location?.address ??
+      user.initial_address ??
+      null;
+
+    const updated_at =
+      user.last_seen_at ??
+      user.location?.updated_at ??
+      user.initial_loc_at ??
+      null;
+
+    return res.json({
+      lat: lat != null ? Number(lat) : null,
+      lng: lng != null ? Number(lng) : null,
+      address: typeof address === 'string' ? address : null,
+      updated_at,
     });
   } catch (err) {
-    console.error('POST /users/me/location failed', err);
-    return res.status(500).json({ error: 'failed to update location' });
+    // eslint-disable-next-line no-console
+    console.error('GET /me/location failed', err);
+    return res.status(500).json({ message: 'failed to read location' });
   }
 });
 
-/**
- * Utility endpoint to update existing operators with addresses
- */
-router.post('/update-addresses', requireAuth, async (req: any, res) => {
+/* -------------------------------------------------------------------------- */
+/*  POST /me/location – upsert last_* and set initial_* if missing            */
+/*  Body: { lat: number, lng: number, address?: string }                      */
+/* -------------------------------------------------------------------------- */
+router.post('/me/location', requireAuth, async (req: any, res) => {
   try {
-    const db = getCustomerDb();
-    const operators = await db.collection('operators').find({
-      $or: [
-        { last_address: null },
-        { last_address: { $exists: false } }
-      ],
-      last_lat: { $exists: true, $ne: null },
-      last_lng: { $exists: true, $ne: null }
-    }).toArray();
+    const uid = String(req.user?.id ?? req.user?._id ?? '');
+    if (!uid) return res.status(401).json({ message: 'unauthorized' });
 
-    let updated = 0;
-    
-    for (const operator of operators) {
-      try {
-        const { reverseGeocode } = await import('./geo');
-        const address = await reverseGeocode(operator.last_lat, operator.last_lng);
-        
-        if (address) {
-          await db.collection('operators').updateOne(
-            { _id: operator._id },
-            { $set: { last_address: address } }
-          );
-          updated++;
-        }
-      } catch (e) {
-        console.log(`Failed to geocode operator ${operator._id}:`, e);
-      }
+    const { lat, lng, address } = req.body || {};
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+      return res.status(400).json({ message: 'lat and lng are required numbers' });
     }
 
-    res.json({ 
-      success: true, 
-      total: operators.length, 
-      updated,
-      message: `Updated ${updated} out of ${operators.length} operators with addresses`
-    });
+    const coll = await usersColl();
+    const filter = idFilter(uid);
+    const existing = await coll.findOne(filter);
+
+    const set: any = {
+      last_lat: latNum,
+      last_lng: lngNum,
+      last_address: typeof address === 'string' ? address : (existing?.last_address ?? existing?.initial_address ?? null),
+      last_seen_at: new Date(),
+    };
+
+    // Set initial_* once if missing
+    if (!existing || existing.initial_lat == null) set.initial_lat = latNum;
+    if (!existing || (existing.initial_lng == null && existing.initial_long == null)) {
+      set.initial_lng = lngNum; // prefer *_lng
+      set.initial_long = existing?.initial_long ?? lngNum; // also keep *_long if your schema used it
+    }
+    if (!existing || existing.initial_address == null) {
+      if (typeof address === 'string' && address.trim()) set.initial_address = address.trim();
+    }
+    if (!existing || existing.initial_loc_at == null) set.initial_loc_at = new Date();
+
+    await coll.updateOne(filter, { $set: set }, { upsert: true });
+    const fresh = await coll.findOne(filter);
+    return res.json(toPublicUser(fresh));
   } catch (err) {
-    console.error('POST /update-addresses failed', err);
-    return res.status(500).json({ error: 'failed to update addresses' });
+    // eslint-disable-next-line no-console
+    console.error('POST /me/location failed', err);
+    return res.status(500).json({ message: 'failed to update location' });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/*  POST /update-initial-from-last – maintenance helper                       */
+/* -------------------------------------------------------------------------- */
+router.post('/update-initial-from-last', requireAuth, async (_req: any, res) => {
+  try {
+    const coll = await usersColl();
+    const cur = coll.find({
+      last_lat: { $exists: true },
+      $or: [{ initial_lat: { $exists: false } }, { initial_lng: { $exists: false } }, { initial_long: { $exists: false } }],
+    });
+
+    let updated = 0;
+    for await (const u of cur) {
+      await coll.updateOne(
+        { _id: u._id },
+        {
+          $set: {
+            initial_lat: u.initial_lat ?? u.last_lat ?? null,
+            initial_lng: u.initial_lng ?? u.last_lng ?? u.last_long ?? null,
+            initial_long: u.initial_long ?? u.last_long ?? u.last_lng ?? null,
+            initial_address: u.initial_address ?? u.last_address ?? null,
+            initial_loc_at: u.initial_loc_at ?? u.last_seen_at ?? new Date(),
+          },
+        }
+      );
+      updated++;
+    }
+
+    return res.json({ success: true, updated });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('POST /update-initial-from-last failed', err);
+    return res.status(500).json({ message: 'failed to update initial fields' });
   }
 });
 

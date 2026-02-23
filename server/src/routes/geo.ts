@@ -1,212 +1,173 @@
+// server/src/routes/geo.ts
 import { Router } from 'express';
-import { requireAuth } from '../middleware/jwt';
+// If you're on Node < 18, uncomment next line and `npm i node-fetch`
+// import fetch from 'node-fetch';
 
 const router = Router();
+const GEOAPIFY_KEY = process.env.GEOAPIFY_API_KEY || process.env.GEOAPIFY_KEY;
 
-function toNum(n: any): number | null { const v = Number(n); return Number.isFinite(v) ? v : null; }
-
-function parseLatLngParam(p?: string): { lat: number; lng: number } | null {
-  if (!p) return null;
-  const [a, b] = p.split(',').map((s) => s.trim());
-  const lat = toNum(a), lng = toNum(b);
-  if (lat == null || lng == null) return null;
-  return { lat, lng };
-}
-
-/**
- * GET /api/geo/route?from=lat,lng&to=lat,lng&mode=drive|walk|bicycle
- * Returns: { points:[{lat,lng},...], distanceMeters, durationSec }
- */
-router.get('/route', requireAuth, async (req, res) => {
-  try {
-    const from = parseLatLngParam(String(req.query.from || ''));
-    const to = parseLatLngParam(String(req.query.to || ''));
-    const mode = (String(req.query.mode || 'drive') as 'drive'|'walk'|'bicycle');
-
-    if (!from || !to) return res.status(400).json({ message: 'from and to are required as "lat,lng"' });
-
-    const key = process.env.GEOAPIFY_API_KEY;
-    if (!key) return res.status(500).json({ message: 'Missing GEOAPIFY_API_KEY' });
-
-    const waypoints = `${from.lat},${from.lng}|${to.lat},${to.lng}`;
-    const url = `https://api.geoapify.com/v1/routing?waypoints=${encodeURIComponent(waypoints)}&mode=${mode}&apiKey=${key}`;
-
-    const r = await fetch(url);
-    if (!r.ok) return res.status(502).json({ message: `Geoapify ${r.status}` });
-    const j = await r.json();
-
-    // GeoJSON → flatten to lat/lng list
-    const feat = j?.features?.[0];
-    const coords = feat?.geometry?.coordinates; // could be LineString or MultiLineString
-    let points: Array<{lat:number; lng:number}> = [];
-
-    if (Array.isArray(coords) && Array.isArray(coords[0]) && typeof coords[0][0] === 'number') {
-      // LineString [ [lng,lat], ... ]
-      points = coords.map(([lng, lat]: number[]) => ({ lat, lng }));
-    } else if (Array.isArray(coords) && Array.isArray(coords[0]) && Array.isArray(coords[0][0])) {
-      // MultiLineString [ [ [lng,lat], ... ], ... ]
-      points = coords.flat().map(([lng, lat]: number[]) => ({ lat, lng }));
-    }
-
-    const dist = feat?.properties?.distance || 0; // meters
-    const dur = feat?.properties?.time || 0;      // seconds
-
-    res.json({ points, distanceMeters: dist, durationSec: dur });
-  } catch (e:any) {
-    res.status(500).json({ message: e?.message || 'route failed' });
-  }
-});
-
-/**
- * GET /api/geo/places?lat=..&lng=..&categories=fuel,service.vehicle.repair&radius=2000
- * Returns: { items:[{id,name,category,lat,lng,address}] }
- * Categories: https://www.geoapify.com/docs/places-api/
- */
-router.get('/places', requireAuth, async (req, res) => {
-  try {
-    const lat = toNum(req.query.lat);
-    const lng = toNum(req.query.lng);
-    const categories = String(req.query.categories || 'fuel,service.vehicle.repair');
-    const radius = Math.min(Math.max(Number(req.query.radius || 2000), 100), 10000);
-
-    if (lat == null || lng == null) return res.status(400).json({ message: 'lat & lng required' });
-
-    const key = process.env.GEOAPIFY_API_KEY;
-    if (!key) return res.status(500).json({ message: 'Missing GEOAPIFY_API_KEY' });
-
-    const url = `https://api.geoapify.com/v2/places?categories=${encodeURIComponent(categories)}&filter=circle:${lng},${lat},${radius}&bias=proximity:${lng},${lat}&limit=30&apiKey=${key}`;
-
-    const r = await fetch(url);
-    if (!r.ok) return res.status(502).json({ message: `Geoapify ${r.status}` });
-    const j = await r.json();
-
-    const items = (j?.features || []).map((f: any) => {
-      const p = f.properties || {};
-      const [lon, la] = (f.geometry?.coordinates || []);
-      return {
-        id: f.id || p.place_id || `${lon},${la}`,
-        name: p.name || p.street || 'Place',
-        category: (p.categories && p.categories[0]) || '',
-        lat: la, lng: lon,
-        address: p.formatted || [p.housenumber, p.street, p.city, p.state, p.country].filter(Boolean).join(', '),
-      };
-    });
-
-    res.json({ items });
-  } catch (e:any) {
-    res.status(500).json({ message: e?.message || 'places failed' });
-  }
-});
-
-/**
- * Reverse geocoding function to convert lat/lng to address
- */
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   try {
-    // Try Geoapify first if API key is available
-    const geoapifyKey = process.env.GEOAPIFY_API_KEY;
-    if (geoapifyKey) {
-      const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}&apiKey=${geoapifyKey}`;
-      const response = await fetch(url);
-      
-      if (response.ok) {
-        const data = await response.json();
-        const feature = data?.features?.[0];
-        
-        if (feature?.properties) {
-          const props = feature.properties;
-          const address = props.formatted || 
-            [props.housenumber, props.street, props.city, props.state, props.country]
-              .filter(Boolean)
-              .join(', ');
-          
-          if (address) return address;
-        }
-      }
-    }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
-    // Fallback to OpenStreetMap Nominatim (free service)
-    try {
-      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`;
-      const response = await fetch(nominatimUrl, {
+    const attemptFormat = (props: Record<string, any> | null | undefined): string | null => {
+      if (!props) return null;
+
+      const pick = (...values: Array<unknown>): string => {
+        for (const value of values) {
+          if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (trimmed.length) return trimmed;
+          }
+        }
+        return '';
+      };
+
+      const streetName = pick(props.street, props.road, props.address_line1, props.name);
+      const houseNumber = pick(props.housenumber, props.house_number);
+      const streetLine = [houseNumber, streetName].filter(Boolean).join(' ').trim();
+
+      const barangay = pick(
+        props.barangay,
+        props.suburb,
+        props.neighbourhood,
+        props.quarter,
+        props.district
+      );
+
+      const municipality = pick(
+        props.municipality,
+        props.town,
+        props.city,
+        props.city_district,
+        props.state_district
+      );
+
+      const city = pick(props.city, props.county);
+
+      const componentsRaw = [streetLine, barangay, municipality || city]
+        .filter(Boolean)
+        .map((c) => c.replace(/\s+/g, ' '));
+
+      const uniqueComponents = componentsRaw.filter((component, idx, arr) => {
+        const lower = component.toLowerCase();
+        return idx === arr.findIndex((c) => c.toLowerCase() === lower);
+      });
+
+      if (uniqueComponents.length) {
+        return uniqueComponents.join(', ');
+      }
+
+      const formatted = pick(props.formatted, props.address_line1, props.address_line2);
+      return formatted || null;
+    };
+
+    const tryGeoapify = async (): Promise<string | null> => {
+      if (!GEOAPIFY_KEY) return null;
+      const url =
+        `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}` +
+        `&limit=1&lang=en&apiKey=${GEOAPIFY_KEY}`;
+
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const json = await res.json();
+      const feature = json?.features?.[0];
+      return attemptFormat(feature?.properties);
+    };
+
+    const tryNominatim = async (): Promise<string | null> => {
+      const url =
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}` +
+        `&addressdetails=1&zoom=18`;
+      const res = await fetch(url, {
         headers: {
-          'User-Agent': 'OperatorApp/1.0'
+          'User-Agent': 'operator-app/1.0 (reverse-geocode helper)'
         }
       });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.display_name) {
-          // Extract detailed location with subdivision/neighborhood
-          const address = data.display_name;
-          const parts = address.split(', ');
-          
-          // Build detailed address by including relevant parts
-          const relevantParts = [];
-          
-          for (let i = 0; i < parts.length; i++) {
-            const part = parts[i].trim();
-            
-            // Skip very specific parts like house numbers, postal codes, country
-            if (part.match(/^\d+$/) || // Just numbers
-                part.includes('Philippines') || 
-                part.includes('5025') || // Postal codes
-                part.includes('Western Visayas') ||
-                part.includes('Region') ||
-                part.includes('Capital District') ||
-                part.includes('Metro Manila')) {
-              continue;
-            }
-            
-            // Include meaningful location parts (neighborhoods, districts, cities)
-            if (part.length > 2 && 
-                !part.includes('Street') && 
-                !part.includes('Road') && 
-                !part.includes('Avenue') &&
-                !part.includes('Boulevard')) {
-              relevantParts.push(part);
-            }
-          }
-          
-          // Return the relevant parts joined with commas
-          if (relevantParts.length > 0) {
-            return relevantParts.join(', ');
-          }
-          
-          // Fallback to original address if no good parts found
-          return address;
-        }
+      if (!res.ok) return null;
+      const json = await res.json();
+      const address = json?.address || {};
+      return attemptFormat({
+        street: address.road,
+        housenumber: address.house_number,
+        barangay: address.suburb || address.neighbourhood || address.village,
+        municipality:
+          address.municipality ||
+          address.town ||
+          address.city_district ||
+          address.county,
+        city: address.city || address.town || address.county,
+        formatted: json?.display_name,
+      });
+    };
+
+    const strategies = [tryGeoapify, tryNominatim];
+    for (const strategy of strategies) {
+      try {
+        const result = await strategy();
+        if (result) return result;
+      } catch (err) {
+        console.warn('[reverseGeocode] strategy failed:', (err as Error)?.message ?? err);
       }
-    } catch (nominatimError) {
-      console.log('Nominatim geocoding failed:', nominatimError);
     }
 
-    // Final fallback: Generate a readable address from coordinates
-    return `Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-  } catch (error) {
-    console.error('Reverse geocoding error:', error);
-    return `Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    return null;
+  } catch (err) {
+    console.warn('[reverseGeocode] failed:', (err as Error)?.message ?? err);
+    return null;
   }
 }
 
 /**
- * Test endpoint for reverse geocoding (for development)
+ * GET /api/geo/route?from=lng,lat&to=lng,lat&mode=drive|walk|bicycle
+ * Returns a GeoJSON FeatureCollection (LineString), similar to Geoapify.
  */
-router.get('/test-reverse-geocode', async (req, res) => {
+router.get('/route', async (req, res) => {
   try {
-    const lat = Number(req.query.lat) || 10.7805;
-    const lng = Number(req.query.lng) || 122.4752;
-    
-    const address = await reverseGeocode(lat, lng);
-    
-    res.json({
-      lat,
-      lng,
-      address,
-      success: !!address
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const from = String(req.query.from || '');
+    const to = String(req.query.to || '');
+    const mode = String(req.query.mode || 'drive');
+
+    const parse = (s: string) => {
+      const [lngStr, latStr] = s.split(',');
+      const lng = Number(lngStr);
+      const lat = Number(latStr);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+      return { lng, lat };
+    };
+
+    const a = parse(from);
+    const b = parse(to);
+    if (!a || !b) return res.status(400).json({ error: 'Invalid from/to' });
+
+    const profile =
+      mode === 'walk' || mode === 'foot' ? 'foot'
+      : mode === 'bicycle' || mode === 'bike' ? 'bike'
+      : 'driving';
+
+    const url =
+      `https://router.project-osrm.org/route/v1/${profile}/` +
+      `${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`;
+
+    const r = await fetch(url);
+    if (!r.ok) {
+      const t = await r.text();
+      return res.status(502).json({ error: 'Routing upstream error', detail: t });
+    }
+
+    const j = await r.json();
+    const route = j?.routes?.[0];
+    if (!route?.geometry) return res.status(404).json({ error: 'No route' });
+
+    const feature = {
+      type: 'Feature',
+      geometry: route.geometry, // GeoJSON LineString
+      properties: { distance: route.distance, duration: route.duration },
+    };
+
+    return res.json({ type: 'FeatureCollection', features: [feature] });
+  } catch (e: any) {
+    return res.status(500).json({ error: 'Route failed', detail: e?.message || String(e) });
   }
 });
 

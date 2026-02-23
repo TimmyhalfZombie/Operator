@@ -1,6 +1,7 @@
 import React from 'react';
 import { tokens } from '../auth/tokenStore';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
+import { initNotifications, presentNow } from '../services/notificationService';
 
 type Ctx = {
   socket: ReturnType<typeof getSocket>;
@@ -31,10 +32,40 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       s.on('disconnect', onDisconnect);
       s.on('connect_error', onError);
 
+      // Ask for notification permission once we have a socket (so we can notify instantly)
+      try {
+        await initNotifications();
+      } catch {}
+
+      // 🔔 Zero-delay: show a local notification as soon as a new request is created
+      const onAssistCreated = (evt: any) => {
+        try {
+          const name =
+            evt?.clientName || evt?.customerName || evt?.contactName || 'Customer';
+          const place =
+            evt?.placeName ||
+            evt?.address ||
+            evt?.location?.name ||
+            evt?.location?.address ||
+            evt?.vehicle?.model ||
+            '';
+          const body = place ? `${name} • ${place}` : `${name} sent a request`;
+
+          presentNow({
+            title: 'New assistance request',
+            body,
+            data: { type: 'assist', requestId: String(evt?.id || '') },
+          });
+        } catch {}
+      };
+
+      s.on('assist:created', onAssistCreated);
+
       return () => {
         s.off('connect', onConnect);
         s.off('disconnect', onDisconnect);
         s.off('connect_error', onError);
+        s.off('assist:created', onAssistCreated);
       };
     })();
 

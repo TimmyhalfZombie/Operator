@@ -1,6 +1,6 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { deleteConversation } from '../features/messages/api';
 import { useConversations } from '../features/messages/useConversations';
 
@@ -27,8 +27,15 @@ function timeAgo(iso?: string | null) {
 export default function MessagesScreen() {
   const { items, loading, error, reload } = useConversations();
 
+  useFocusEffect(
+    React.useCallback(() => {
+      reload();
+    }, [reload])
+  );
+
   const handleConversationPress = (item: any) => {
-    router.push({ pathname: '/chat/[id]', params: { id: item.id } });
+    const displayName = item.title || item.name || 'Conversation';
+    router.push({ pathname: '/chat/[id]', params: { id: item.id, name: displayName } });
   };
 
   const handleConversationLongPress = (item: any) => {
@@ -76,7 +83,17 @@ export default function MessagesScreen() {
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item }) => (
             <TouchableOpacity onPress={() => handleConversationPress(item)} onLongPress={() => handleConversationLongPress(item)} style={styles.row} activeOpacity={0.8}>
-              <View style={styles.avatar} />
+              <View style={styles.avatarWrap}>
+                {item.avatarUrl ? (
+                  <Image source={{ uri: item.avatarUrl }} style={styles.avatarImg} />
+                ) : (
+                  <View style={styles.avatarFallback}>
+                    <Text style={styles.avatarFallbackText} numberOfLines={1}>
+                      {(item.title || 'C').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </View>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Text style={styles.name} numberOfLines={1}>{item.title || 'Conversation'}</Text>
@@ -100,11 +117,18 @@ export default function MessagesScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: BG },
-  header: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
+  safe: { 
+    flex: 1, 
+    backgroundColor: BG
+   },
+   
+  header: { paddingHorizontal: 16, paddingTop: 35, paddingBottom: 8 },
   row: { backgroundColor: CARD, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center' },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2d2d2d', marginRight: 12 },
-  name: { color: TEXT, fontSize: 16, fontWeight: '700', flex: 1 },
+  avatarWrap: { width: 44, height: 44, borderRadius: 22, marginRight: 12, overflow: 'hidden' },
+  avatarImg: { width: '100%', height: '100%' },
+  avatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#2d2d2d' },
+  avatarFallbackText: { color: '#FFFFFF', fontFamily: 'Inter-Black', fontSize: 16 },
+  name: { color: TEXT, fontSize: 16, fontFamily: 'Inter-Black', flex: 1 },
   time: { color: SUB, marginLeft: 8, fontSize: 12 },
   preview: { color: SUB, marginTop: 4 },
   unreadDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: GREEN, marginLeft: 8 },

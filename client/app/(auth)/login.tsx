@@ -11,7 +11,7 @@ export default function LoginScreen() {
   async function onSignIn() {
     setError('');
     if (!values.identifier.trim() || !values.password.trim()) {
-      setError('Please enter your email/username and password');
+      setError('Please enter your phone or email and password');
       return;
     }
     setLoading(true);

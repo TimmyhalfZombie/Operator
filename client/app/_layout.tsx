@@ -1,12 +1,13 @@
 // app/_layout.tsx
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import { tokens } from '../src/auth/tokenStore';
 import { DeclinedRequestsProvider } from '../src/contexts/DeclinedRequestsContext';
 import { useImmersiveMode } from '../src/hooks/useImmersiveMode';
+import { onNotificationResponse } from '../src/services/notificationService';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -18,8 +19,8 @@ export default function RootLayout() {
     'Inter-Regular': require('../assets/fonts/static/Inter_18pt-Regular.ttf'),
   });
 
-  const [tokensReady, setTokensReady] = useState(false);
-  
+  const [authReady, setAuthReady] = useState(false);
+
   // Enable immersive mode
   useImmersiveMode();
 
@@ -27,14 +28,33 @@ export default function RootLayout() {
   useEffect(() => {
     (async () => {
       try {
-        await tokens.loadFromStorage();
+        await tokens.initTokens();
+        const uid = await tokens.getUserIdAsync();
+        console.log('[auth] ready; userId =', uid);
       } finally {
-        setTokensReady(true);
+        setAuthReady(true);
       }
     })();
   }, []);
 
-  const ready = fontsLoaded && tokensReady;
+  // Route when a notification is tapped
+  useEffect(() => {
+    const unsub = onNotificationResponse((resp) => {
+      const data: any = resp.notification.request.content.data || {};
+      if (data?.type === 'chat' && data?.conversationId) {
+        const params: Record<string, string> = { id: String(data.conversationId) };
+        if (typeof data?.name === 'string' && data.name.trim()) {
+          params.name = data.name.trim();
+        }
+        router.push({ pathname: '/(tabs)/chat/[id]', params });
+      } else if (data?.type === 'assist' && data?.requestId) {
+        router.push({ pathname: '/ongoing-detail', params: { id: String(data.requestId) } });
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const ready = fontsLoaded && authReady;
 
   const onLayoutRootView = useCallback(async () => {
     if (ready) {

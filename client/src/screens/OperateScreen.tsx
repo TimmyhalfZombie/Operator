@@ -3,20 +3,20 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import TemperatureDial from '../components/TemperatureDial';
 import { useBleScanner } from '../features/useBLEscanner';
 
-// Inter font families (ensure these are loaded in your app)
 const INTER_BLACK = 'Inter-Black';
 const INTER_MEDIUM = 'Inter-Medium';
 const INTER_REGULAR = 'Inter-Regular';
 
-type Phase = 'idle' | 'extending' | 'heating' | 'retracting';
+type Phase = 'idle' | 'extending' | 'heating' | 'coolingdown' | 'retracting';
 
 export default function OperateScreen() {
   const { sendByte, subscribeToNotifications, isConnected } = useBleScanner();
   const pressRef = useRef(0);
   const [phase, setPhase] = useState<Phase>('idle');
   const [tempC, setTempC] = useState<number>(0);
-  // Delay the visible label for retracting by 1s
   const [labelPhase, setLabelPhase] = useState<Phase>('idle');
+  const [phaseDeadlineAt, setPhaseDeadlineAt] = useState<number | null>(null);
+  const [, setNow] = useState<number>(Date.now());
 
   const busy = phase !== 'idle';
 
@@ -24,9 +24,10 @@ export default function OperateScreen() {
     labelPhase === 'idle' ? 'START' :
     labelPhase === 'extending' ? 'EXTENDING…' :
     labelPhase === 'heating' ? 'HEATING…' :
+    labelPhase === 'coolingdown' ? 'COOLING…' :
     'RETRACTING…';
 
-  // Keep label in prior phase for 1s before showing RETRACTING
+  // Delay visible label for retracting by 1s
   useEffect(() => {
     if (phase === 'retracting') {
       const t = setTimeout(() => setLabelPhase('retracting'), 1000);
@@ -34,6 +35,34 @@ export default function OperateScreen() {
     }
     setLabelPhase(phase);
   }, [phase]);
+
+  // Set countdown deadline per phase: heating=15min, coolingdown=15min
+  useEffect(() => {
+    const now = Date.now();
+    if (phase === 'heating') {
+      setPhaseDeadlineAt(now + 15 * 60 * 1000);
+    } else if (phase === 'coolingdown') {
+      setPhaseDeadlineAt(now + 15 * 60 * 1000);
+    } else {
+      setPhaseDeadlineAt(null);
+    }
+  }, [phase]);
+
+  // Ticker to update displayed timer every 500ms while active
+  useEffect(() => {
+    if (!phaseDeadlineAt) return;
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [phaseDeadlineAt]);
+
+  const timerText = (() => {
+    if (!phaseDeadlineAt) return undefined;
+    const remainingMs = Math.max(0, phaseDeadlineAt - Date.now());
+    const secs = Math.floor(remainingMs / 1000);
+    const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+    const ss = String(secs % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  })();
 
   const handleStart = async () => {
     if (busy) return;
@@ -57,9 +86,7 @@ export default function OperateScreen() {
         Alert.alert('Not connected', 'Please connect to a device first.');
         return;
       }
-      // UI: immediately reflect retracting to avoid brief START flash
       setPhase('retracting');
-      // Convention: send 0 to signal STOP/ABORT; adjust to firmware as needed
       await sendByte(0);
     } catch (e) {
       console.log('sendByte STOP error:', e);
@@ -67,29 +94,29 @@ export default function OperateScreen() {
     }
   };
 
-  // Listen for ESP32 status + temperature notifications
+  // Parse BLE notifications for temperature + state
   useEffect(() => {
     const unsub = subscribeToNotifications?.((raw: string) => {
       const msg = raw.trim();
 
-      // Parse temperature (TEMP:85, T=85.3C, etc.)
+      // Match "temperature: 288", "temp: 28.6", "t=30", "T:30C", "28.5 C"
       const tempMatch =
-        /(?:temp|t)\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*°?\s*c?/i.exec(msg) ||
+        /(?:temp(?:erature)?|^t)\s*[:=]?\s*(-?\d+(?:\.\d+)?)/i.exec(msg) ||
         /\b(-?\d+(?:\.\d+)?)\s*°?\s*c\b/i.exec(msg);
 
       if (tempMatch) {
         const v = parseFloat(tempMatch[1]);
-        if (!Number.isNaN(v)) {
-          setTempC(v);
-        }
+        if (!Number.isNaN(v)) setTempC(v);
       }
 
-      // State machine
+      // State machine (unchanged + COOLING)
       const m = msg.toUpperCase();
       if (m.startsWith('EXTEND')) {
         setPhase('extending');
       } else if (m.startsWith('HOLD') || m.includes('HEAT')) {
         setPhase('heating');
+      } else if (m.includes('COOL') || m.includes('COOLING') || m.includes('COOL-DOWN') || m.includes('COOL DOWN')) {
+        setPhase('coolingdown');
       } else if (m.startsWith('RETRACT')) {
         setPhase('retracting');
       } else if (m.includes('COMPLETE') || m.includes('READY') || m.includes('SAFE:DONE')) {
@@ -99,9 +126,7 @@ export default function OperateScreen() {
       }
     });
 
-    return () => {
-      try { unsub && unsub(); } catch {}
-    };
+    return () => { try { unsub && unsub(); } catch {} };
   }, [subscribeToNotifications]);
 
   return (
@@ -113,34 +138,28 @@ export default function OperateScreen() {
 
       {/* Dial */}
       <View style={{ marginTop: 90, justifyContent: 'center', alignItems: 'center' }}>
-        <TemperatureDial 
-          isHeating={phase === 'heating'} 
-          isRetracting={phase === 'retracting'} 
+        <TemperatureDial
+          value={tempC}
+          minValue={0}
+          maxValue={120}
+          isHeating={phase === 'heating'}
+          isCooling={phase === 'coolingdown'}
+          isRetracting={phase === 'retracting'}
+          timerText={timerText}
         />
       </View>
 
       <TouchableOpacity
-        style={[
-          styles.startBtn, 
-          busy && styles.startBtnDisabled,
-          busy && styles.phaseBtn
-        ]}
+        style={[styles.startBtn, busy && styles.startBtnDisabled, busy && styles.phaseBtn]}
         onPress={handleStart}
         disabled={busy}
         activeOpacity={0.8}
       >
-        <Text style={[
-          styles.startTxt,
-          busy && styles.phaseTxt
-        ]}>{label}</Text>
+        <Text style={[styles.startTxt, busy && styles.phaseTxt]}>{label}</Text>
       </TouchableOpacity>
 
       {busy && (
-        <TouchableOpacity
-          style={styles.stopBtn}
-          onPress={handleStop}
-          activeOpacity={0.85}
-        >
+        <TouchableOpacity style={styles.stopBtn} onPress={handleStop} activeOpacity={0.85}>
           <Text style={styles.stopTxt}>STOP</Text>
         </TouchableOpacity>
       )}
@@ -171,15 +190,8 @@ const styles = StyleSheet.create({
     fontFamily: INTER_BLACK,
     textAlign: 'center',
   },
-  phaseBtn: {
-    backgroundColor: '#6E686A',
-    borderColor: '#8C8386',
-  },
-  phaseTxt: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontFamily: INTER_BLACK,
-  },
+  phaseBtn: { backgroundColor: '#6E686A', borderColor: '#8C8386' },
+  phaseTxt: { color: '#ffffff', fontWeight: 'bold', fontFamily: INTER_BLACK },
   stopBtn: {
     marginTop: 16,
     width: '90%',
@@ -188,11 +200,5 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 14,
   },
-  stopTxt: {
-    textAlign: 'center',
-    color: '#111',
-    fontFamily: INTER_BLACK,
-    fontSize: 18,
-    letterSpacing: 2,
-  },
+  stopTxt: { textAlign: 'center', color: '#111', fontFamily: INTER_BLACK, fontSize: 18, letterSpacing: 2 },
 });

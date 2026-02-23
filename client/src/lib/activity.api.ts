@@ -8,6 +8,7 @@ export type AssistItem = {
   createdAt?: string;
   updatedAt?: string;
   assignedTo?: string | null;
+  acceptedBy?: string | null;
   userId?: string | null;
   // Client name fields from database
   clientName?: string;
@@ -16,6 +17,7 @@ export type AssistItem = {
   user?: { name?: string };
   // Operator information
   operator?: {
+    id?: string | null;
     name?: string;
     location?: string;
     lastSeen?: string;

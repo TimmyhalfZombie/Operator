@@ -64,17 +64,17 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
   const Content = (
     <View style={styles.itemRow}>
       <View style={styles.itemLeft}>
-        <View style={styles.itemIcon}>
-          {isOngoing ? (
-            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-              <Icons.Clock size={18} color="#FFA500" weight="bold" />
-            </Animated.View>
-          ) : isNew ? (
-            <Icons.Wrench size={18} color={GREEN} weight="bold" />
-          ) : (
-            <Icons.CheckCircle size={18} color={GREEN} weight="bold" />
-          )}
-        </View>
+        {isOngoing ? (
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+            <Icons.Clock size={18} color="#FFA500" weight="bold" />
+          </Animated.View>
+        ) : isNew ? (
+          <Icons.Wrench size={20} color={GREEN} weight="fill" />
+        ) : (
+          <View style={styles.checkWrap}>
+            <Icons.Check size={16} color="#0A0A0A" weight="bold" />
+          </View>
+        )}
         <View style={styles.itemTextWrap}>
           {isNew && <Text style={styles.badgeNew}>Request assistance</Text>}
           <Text numberOfLines={1} style={isNew ? styles.itemTitleNewBold : styles.itemTitle}>{title}</Text>
@@ -95,10 +95,6 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
       <View style={styles.itemRight}>
         {isNew ? (
           <View style={styles.newDot} />
-        ) : isOngoing ? (
-          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-            <Icons.Clock size={15} color="#FFA500" weight="bold" />
-          </Animated.View>
         ) : null}
       </View>
     </View>
@@ -299,16 +295,6 @@ const styles = StyleSheet.create({
     gap: 12 as any 
   },
 
-  itemIcon: {
-    width: 32, 
-    height: 32, 
-    borderRadius: 16, 
-    borderWidth: 1,
-     borderColor: GREEN,
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    backgroundColor: 'rgba(110,255,135,0.08)',
-  },
 
   itemTextWrap: { 
     flex: 1 

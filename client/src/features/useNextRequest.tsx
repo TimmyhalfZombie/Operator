@@ -76,7 +76,8 @@ export function useNextAssist() {
       try {
         const { conversationId } = await acceptAssist(id);
         if (conversationId) {
-          router.push({ pathname: '/chat/[id]', params: { id: conversationId } });
+          const displayName = data?.clientName || data?._raw?.clientName || 'Client';
+          router.push({ pathname: '/chat/[id]', params: { id: conversationId, name: displayName } });
         }
       } catch (e: any) {
         const msg = String(e?.message || '');

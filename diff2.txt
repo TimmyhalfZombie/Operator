@@ -1,0 +1,14 @@
+﻿client/app.config.js
+client/app/_layout.tsx
+client/package-lock.json
+client/package.json
+client/src/components/GeoapifyMap.tsx
+client/src/components/TemperatureDial.tsx
+client/src/contexts/SocketProvider.tsx
+client/src/features/navigation/RouteMap.tsx
+client/src/features/useMessages.tsx
+client/src/lib/operator.api.ts
+client/src/screens/OperateScreen.tsx
+server/src/index.ts
+server/src/routes/assist.ts
+server/src/socket.ts

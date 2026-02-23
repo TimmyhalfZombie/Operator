@@ -7,6 +7,16 @@ import { ConversationMeta } from '../models/conversationMeta';
 import { Message } from '../models/message';
 import { getIO } from '../socket';
 
+function sanitizeMessageText(raw: any): string {
+  const collapsed = String(raw ?? '').replace(/[\s\u00A0]+/g, ' ').trim();
+  if (!collapsed) return '';
+  const tokens = collapsed.split(' ');
+  if (tokens.length > 1 && tokens.every((tok) => tok.length === 1)) {
+    return tokens.join('');
+  }
+  return collapsed;
+}
+
 const r = Router();
 
 function isValidOid(v: string | undefined | null): v is string { return !!v && Types.ObjectId.isValid(v); }
@@ -81,8 +91,13 @@ async function resolveTitleAndPeer(me: string, conv: any) {
   const customerDb = getCustomerDb();
   const authDb = getAuthDb();
 
-  const members = (conv?.members || []).map((m: any) => String(m));
-  const otherIdStr = members.find((m: string) => m !== String(me)) || null;
+  const participantIds: string[] = Array.isArray(conv?.participantIds) && conv.participantIds.length
+    ? conv.participantIds.map((id: any) => String(id))
+    : Array.isArray(conv?.participants)
+      ? conv.participants.map((m: any) => String(m))
+      : [];
+  const uniqueParticipants = Array.from(new Set([...participantIds, String(me)].filter(Boolean)));
+  const otherIdStr = uniqueParticipants.find((m: string) => m !== String(me)) || null;
 
   let title: string | null = conv?.title || null;
   let peer: any = null;
@@ -113,27 +128,62 @@ async function resolveTitleAndPeer(me: string, conv: any) {
 
   // 3) Load peer record and use it for both peer info and title fallback
   if (otherIdStr && isValidOid(otherIdStr)) {
+    const projection = {
+      username: 1,
+      phone: 1,
+      email: 1,
+      name: 1,
+      displayName: 1,
+      fullName: 1,
+      firstname: 1,
+      firstName: 1,
+      lastname: 1,
+      lastName: 1,
+      given_name: 1,
+      family_name: 1,
+      avatarUrl: 1,
+      avatar: 1,
+    } as any;
+
+    let userDoc: any = null;
     try {
-      const u = await authDb
+      userDoc = await authDb
         .collection('users')
-        .findOne(
-          { _id: new Types.ObjectId(otherIdStr) },
-          { projection: { username: 1, phone: 1, email: 1, name: 1, displayName: 1, fullName: 1, firstname: 1, firstName: 1, lastname: 1, lastName: 1, given_name: 1, family_name: 1, avatarUrl: 1 } as any }
-        );
-      const name = deriveTitleFromUser(u);
-      peer = {
-        id: otherIdStr,
-        username: u?.username ?? null,
-        phone: u?.phone ?? null,
-        email: u?.email ?? null,
-        name: name ?? null,
-        avatarUrl: u?.avatarUrl ?? null,
-      };
-      if (!title) title = name;
+        .findOne({ _id: new Types.ObjectId(otherIdStr) }, { projection });
     } catch {}
+
+    if (!userDoc || (!userDoc.avatarUrl && !userDoc.avatar)) {
+      try {
+        const alt = await customerDb
+          .collection('users')
+          .findOne({ _id: new Types.ObjectId(otherIdStr) }, { projection });
+        if (alt) {
+          userDoc = { ...alt, ...userDoc };
+        }
+      } catch {}
+    }
+
+    const name = deriveTitleFromUser(userDoc);
+    peer = {
+      id: otherIdStr,
+      username: userDoc?.username ?? null,
+      phone: userDoc?.phone ?? null,
+      email: userDoc?.email ?? null,
+      name: name ?? null,
+      avatarUrl: userDoc?.avatarUrl ?? userDoc?.avatar ?? null,
+    };
+    if (!title) title = name;
   }
 
-  return { title: title || null, peer, members };
+  return { title: title || null, peer, participants: uniqueParticipants };
+}
+
+function allParticipantIds(conv: any): string[] {
+  const ids = new Set<string>();
+  if (Array.isArray(conv?.participantIds)) conv.participantIds.forEach((id: any) => ids.add(String(id)));
+  if (Array.isArray(conv?.participants)) conv.participants.forEach((id: any) => ids.add(String(id)));
+  if (Array.isArray(conv?.members)) (conv as any).members.forEach((id: any) => ids.add(String(id)));
+  return Array.from(ids);
 }
 
 /* ---------------- list: previews (with better title) ---------------- */
@@ -142,35 +192,84 @@ r.get('/', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   const limit = Math.min(Number(req.query.limit || 50), 200);
 
-  let pipeline: any[] = [];
-  if (isValidOid(me)) pipeline = [{ $match: { members: new Types.ObjectId(me) } }];
-  else {
-    pipeline = [
-      { $addFields: { membersStr: { $map: { input: '$members', as: 'm', in: { $toString: '$$m' } } } } },
-      { $match: { membersStr: me } },
-    ];
-  }
+  const coalesceStage = {
+    $addFields: {
+      participants: {
+        $cond: [
+          { $gt: [{ $size: { $ifNull: ['$participants', []] } }, 0] },
+          '$participants',
+          '$members',
+        ],
+      },
+    },
+  };
 
-  pipeline.push(
+  const ensureParticipantIdsStage = {
+    $addFields: {
+      participantIds: {
+        $cond: [
+          { $gt: [{ $size: { $ifNull: ['$participantIds', []] } }, 0] },
+          '$participantIds',
+          { $map: { input: '$participants', as: 'm', in: { $toString: '$$m' } } },
+        ],
+      },
+    },
+  };
+
+  const matchStage = isValidOid(me)
+    ? {
+        $match: {
+          $or: [
+            { participants: new Types.ObjectId(me) },
+            { participantIds: String(me) },
+          ],
+        },
+      }
+    : {
+        $match: { participantIds: String(me) },
+      };
+
+  const pipeline: any[] = [
+    coalesceStage,
+    ensureParticipantIdsStage,
+    matchStage,
+    {
+      $lookup: {
+        from: 'messages',
+        let: { convId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$conversationId', '$$convId'] } } },
+          { $sort: { createdAt: -1 } },
+          { $limit: 1 },
+          { $project: { content: 1, attachment: 1 } },
+        ],
+        as: 'lastMessageDoc',
+      },
+    },
+    { $addFields: { lastMessageDoc: { $arrayElemAt: ['$lastMessageDoc', 0] } } },
     { $sort: { lastMessageAt: -1, updatedAt: -1 } },
     { $limit: limit },
     {
       $project: {
         id: { $toString: '$_id' },
         _id: 1,
-        members: 1,
+        participants: 1,
+        participantIds: 1,
         requestId: 1,
         title: 1,
         lastMessage: 1,
+        lastMessageDoc: 1,
         lastMessageAt: 1,
       },
-    }
-  );
+    },
+  ];
 
   const raw = await Conversation.aggregate(pipeline);
   const items = await Promise.all(
     raw.map(async (c: any) => {
-      const { title } = await resolveTitleAndPeer(me, c);
+      const info = await resolveTitleAndPeer(me, c);
+      const title = info.title;
+      const peer = info.peer;
       // Load unread for me (best-effort)
       let unread: number | null = null;
       try {
@@ -182,12 +281,27 @@ r.get('/', requireAuth as any, async (req: any, res) => {
         ).lean();
         unread = (meta as any)?.unread ?? null;
       } catch {}
+      const lastDoc = c?.lastMessageDoc || null;
+      const storedLast = typeof c?.lastMessage === 'string' ? c.lastMessage : null;
+      const preview = typeof lastDoc?.content === 'string' && lastDoc.content.trim()
+        ? lastDoc.content
+        : storedLast && storedLast.trim()
+          ? storedLast
+          : lastDoc?.attachment
+            ? '[attachment]'
+            : null;
       return {
         id: String(c._id),
         title: title || 'Conversation',
         requestId: c.requestId ? String(c.requestId) : null,
-        lastMessage: c.lastMessage ?? null,
+        lastMessage: preview,
         lastMessageAt: c.lastMessageAt ?? null,
+        participants: Array.isArray(c.participantIds)
+          ? c.participantIds.map((id: any) => String(id))
+          : Array.isArray(c.participants)
+            ? c.participants.map((m: any) => String(m))
+            : [],
+        peer,
         unread,
       };
     })
@@ -205,8 +319,8 @@ r.get('/:id', requireAuth as any, async (req: any, res) => {
 
   const conv = await Conversation.findById(convId);
   if (!conv) return res.status(404).json({ error: 'not_found' });
-  const members = (conv.members || []).map((m: any) => String(m));
-  if (!members.includes(me)) return res.status(404).json({ error: 'not_found' });
+  const participants = allParticipantIds(conv);
+  if (!participants.includes(me)) return res.status(404).json({ error: 'not_found' });
 
   const { title, peer } = await resolveTitleAndPeer(me, conv);
 
@@ -225,7 +339,7 @@ r.get('/:id', requireAuth as any, async (req: any, res) => {
   res.json({
     id: String(conv._id),
     requestId: conv.requestId ? String(conv.requestId) : null,
-    members,
+    participants,
     title: title || 'Conversation',
     peer,
     lastMessage: (conv as any)?.lastMessage ?? null,
@@ -246,7 +360,7 @@ r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
 
   const conv = await Conversation.findById(convId);
   if (!conv) return res.status(404).json({ error: 'not found' });
-  if (!conv.members.map((m: any) => String(m)).includes(me)) return res.status(404).json({ error: 'not found' });
+  if (!allParticipantIds(conv).includes(me)) return res.status(404).json({ error: 'not found' });
 
   const q: any = { conversationId: conv._id };
   if (before) q.createdAt = { $lt: before };
@@ -257,6 +371,7 @@ r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
     conversationId: String(m.conversationId),
     from: String(m.senderId),
     text: m.content,
+    attachment: m.attachment ?? null,
     createdAt: (m.createdAt ?? new Date()).toISOString(),
   })).reverse();
 
@@ -283,6 +398,50 @@ r.get('/:id/messages', requireAuth as any, async (req: any, res) => {
   res.json({ items });
 });
 
+/* ---------------- delete message ---------------- */
+
+r.delete('/:id/messages/:messageId', requireAuth as any, async (req: any, res) => {
+  const me: string = String(req.user?.id || '');
+  const convId = String(req.params.id || '');
+  const messageId = String(req.params.messageId || '');
+
+  if (!isValidOid(convId) || !isValidOid(messageId)) return res.status(404).json({ error: 'not found' });
+
+  try {
+    const conv = await Conversation.findById(convId);
+    if (!conv) return res.status(404).json({ error: 'not found' });
+    if (!allParticipantIds(conv).includes(me)) return res.status(404).json({ error: 'not found' });
+
+    const msg = await Message.findOneAndDelete({ _id: new Types.ObjectId(messageId), conversationId: conv._id });
+    if (!msg) return res.status(404).json({ error: 'not found' });
+
+    // Update conversation preview if needed
+    try {
+      const latest = (await Message.findOne({ conversationId: conv._id }).sort({ createdAt: -1 }).lean()) as any;
+      await Conversation.findByIdAndUpdate(conv._id, {
+        lastMessage: latest?.content ?? latest?.text ?? null,
+        lastMessageAt: latest?.createdAt ?? null,
+      }).catch(() => void 0);
+    } catch (e) {
+      console.warn('[rest] update conversation preview after delete failed:', (e as Error).message);
+    }
+
+    try {
+      const io = getIO();
+      io.to(`conv:${convId}`).emit('message:deleted', {
+        success: true,
+        conversationId: String(convId),
+        messageId: String(messageId),
+      });
+    } catch {}
+
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error('[rest] delete message failed:', e?.message || e);
+    res.status(500).json({ error: 'delete_failed' });
+  }
+});
+
 /* ---------------- ensure conversation ---------------- */
 
 r.post('/ensure', requireAuth as any, async (req: any, res) => {
@@ -304,21 +463,38 @@ r.post('/ensure', requireAuth as any, async (req: any, res) => {
     return res.status(400).json({ message: 'peerUserId and auth user must be valid ObjectIds' });
   }
 
-  const members = [new Types.ObjectId(me), new Types.ObjectId(peerUserId!)].sort();
-  const q: any = { members: { $all: members, $size: 2 } };
+  const participantsArr = [new Types.ObjectId(me), new Types.ObjectId(peerUserId!)].sort();
+  const participantIds = participantsArr.map(String).sort();
+  const participantsHash = participantIds.join(':');
+  const q: any = { participantsHash };
 
-  let conv = await Conversation.findOne(q);
+  let conv = await Conversation.findOne(q) || await Conversation.findOne({ participantIds: { $all: participantIds } });
   if (!conv) {
     if (requestId && !isValidOid(requestId)) {
       return res.status(400).json({ message: 'requestId must be a valid ObjectId' });
     }
-    conv = await Conversation.create({
-      members,
-      requestId: requestId ? new Types.ObjectId(requestId) : undefined,
-      lastMessageAt: new Date(),
-    });
+    try {
+      conv = await Conversation.create({
+        participants: participantsArr,
+        participantIds,
+        requestId: requestId ? new Types.ObjectId(requestId) : undefined,
+        lastMessageAt: new Date(),
+      });
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        conv = await Conversation.findOne(q) || await Conversation.findOne({ participantIds: { $all: participantIds } });
+      }
+      if (!conv) throw err;
+    }
   } else if (requestId && !conv.requestId && isValidOid(requestId)) {
     await Conversation.updateOne({ _id: conv._id }, { $set: { requestId: new Types.ObjectId(requestId) } }).catch(() => void 0);
+  }
+
+  if (conv && (!Array.isArray((conv as any).participantIds) || participantIds.some((id) => !(conv as any).participantIds.includes(id)))) {
+    await Conversation.updateOne(
+      { _id: conv._id },
+      { $set: { participantIds, participantsHash } }
+    ).catch(() => void 0);
   }
 
   res.json({ id: String(conv._id) });
@@ -329,15 +505,20 @@ r.post('/ensure', requireAuth as any, async (req: any, res) => {
 r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
   const me: string = String(req.user?.id || '');
   const convId = String(req.params.id || '');
-  const text = String((req.body as any)?.text || '').trim();
+  const rawText = (req.body as any)?.text;
+  const attachment = typeof (req.body as any)?.attachment === 'string'
+    ? String((req.body as any).attachment).trim()
+    : null;
+  const text = sanitizeMessageText(rawText || '');
 
   if (!isValidOid(convId)) return res.status(404).json({ error: 'not found' });
-  if (!text) return res.status(400).json({ error: 'Text is required' });
+  if (!text && !attachment) return res.status(400).json({ error: 'Message requires text or attachment' });
 
   try {
     const conv = await Conversation.findById(convId);
     if (!conv) return res.status(404).json({ error: 'not found' });
-    if (!conv.members.map((m: any) => String(m)).includes(me)) return res.status(404).json({ error: 'not found' });
+    const participantIds = allParticipantIds(conv);
+    if (!participantIds.includes(me)) return res.status(404).json({ error: 'not found' });
 
     const stamp = new Date();
     const sender = isValidOid(me) ? new Types.ObjectId(me) : me;
@@ -345,14 +526,17 @@ r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
       conversationId: conv._id,
       senderId: sender,
       content: text,
+      attachment,
       createdAt: stamp,
     });
 
-    await Conversation.findByIdAndUpdate(conv._id, { lastMessage: text, lastMessageAt: stamp }).catch((e) =>
+    const previewText = text || (attachment ? '' : '');
+
+    await Conversation.findByIdAndUpdate(conv._id, { lastMessage: previewText, lastMessageAt: stamp }).catch((e) =>
       console.warn('[rest] update conversation preview failed:', (e as Error).message)
     );
 
-    const others = conv.members.map((m: any) => String(m)).filter((id: string) => id !== me);
+    const others = participantIds.filter((id: string) => id !== me);
     await Promise.all(
       others.map(async (uid: string) => {
         try {
@@ -381,6 +565,7 @@ r.post('/:id/messages', requireAuth as any, async (req: any, res) => {
       conversationId: String(conv._id),
       from: String(msg.senderId),
       text,
+      attachment,
       createdAt: (msg.createdAt ?? stamp).toISOString(),
     };
 
@@ -406,7 +591,7 @@ r.delete('/:id', requireAuth as any, async (req: any, res) => {
   try {
     const conv = await Conversation.findById(convId);
     if (!conv) return res.status(404).json({ error: 'not_found' });
-    const isMember = conv.members.map((m: any) => String(m)).includes(me);
+    const isMember = allParticipantIds(conv).includes(me);
     if (!isMember) return res.status(403).json({ error: 'forbidden' });
 
     const db = getCustomerDb();

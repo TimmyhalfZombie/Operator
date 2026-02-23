@@ -1,15 +1,15 @@
-import { api } from '../../lib/http';
-import { tokens } from '../../auth/tokenStore';
 import type { Router } from 'expo-router';
+import { tokens } from '../../auth/tokenStore';
+import { api } from '../../lib/http';
 
 export type ProfileData = { username: string; phone: string; email: string };
 
 export async function fetchProfile(): Promise<ProfileData> {
-  const me = await api('/api/users/me', { method: 'GET', auth: true });
+  const me = await api('/api/auth/me', { method: 'GET', auth: true });
   return {
-    username: me?.username ?? '',
-    phone: me?.phone ?? '',
-    email: me?.email ?? '',
+    username: me?.username ?? me?.name ?? me?.email ?? '',
+    phone: me?.phone ?? me?.phoneNumber ?? me?.customerPhone ?? me?.contactPhone ?? me?.mobile ?? me?.tel ?? '',
+    email: me?.email ?? me?.contactEmail ?? me?.username ?? '',
   };
 }
 

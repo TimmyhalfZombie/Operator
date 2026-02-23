@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ObjectId } from 'mongodb';
 import { Types } from 'mongoose';
 import { getAuthDb, getCustomerDb } from '../db/connect';
+import { sendPushToUserIds } from '../lib/expoPush';
 import { requireAuth } from '../middleware/jwt';
 import { getIO } from '../socket'; // best-effort: if socket exists we'll emit
 
@@ -124,7 +125,7 @@ router.get('/mine', requireAuth, async (req, res, next) => {
 
     const items = docs.map((d) => ({
       id: String(d._id),
-      status: d.status || 'pending',
+      status: typeof d.status === 'string' ? d.status.toLowerCase() : 'pending',
       vehicle: d.vehicle || null,
       location: d.location || null,
       createdAt: d.createdAt || (d as any).created_at || null,
@@ -187,15 +188,16 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       
       // For completed requests, show the operator who completed it
       if (d.status === 'completed' && d.completedBy) {
+        const operatorUserId = String(d.completedBy);
         try {
           const operator = await customerDb.collection('operators').findOne({ user_id: String(d.completedBy) });
-          console.log('Found operator for completedBy:', operator);
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
             const lastSeen = operator.last_seen_at;
             
             operatorInfo = {
+              id: operatorUserId,
               name: operator.name || 'Operator',
               location: operator.last_address || operator.initial_address || (lat && lng ? 
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -212,14 +214,15 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
       else if (d.assignedTo || d.acceptedBy) {
         try {
           const operatorId = d.assignedTo || d.acceptedBy;
-          const operator = await customerDb.collection('operators').findOne({ user_id: String(operatorId) });
-          console.log('Found operator for assignedTo/acceptedBy:', operator);
+          const operatorUserId = String(operatorId);
+          const operator = await customerDb.collection('operators').findOne({ user_id: operatorUserId });
           if (operator) {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
             const lastSeen = operator.last_seen_at;
             
             operatorInfo = {
+              id: operatorUserId,
               name: operator.name || 'Operator',
               location: operator.last_address || operator.initial_address || (lat && lng ? 
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -253,12 +256,13 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
 
       return {
         id: String(d._id),
-        status: d.status || 'pending',
+        status: typeof d.status === 'string' ? d.status.toLowerCase() : 'pending',
         vehicle: d.vehicle || null,
         location: d.location || null,
         createdAt: d.createdAt || (d as any).created_at || null,
         updatedAt: d.updatedAt || (d as any).updated_at || null,
         assignedTo: d.assignedTo ? String(d.assignedTo) : null,
+        acceptedBy: d.acceptedBy ? String(d.acceptedBy) : null,
         userId: d.userId ? String(d.userId) : null,
         rating: d.rating ?? null,
         completedAt: d.completedAt ?? null,
@@ -350,14 +354,16 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     // Get operator information if available
     let operatorInfo = null;
     if (doc.status === 'completed' && doc.completedBy) {
+      const operatorUserId = String(doc.completedBy);
       try {
-        const operator = await db.collection('operators').findOne({ user_id: String(doc.completedBy) });
+        const operator = await db.collection('operators').findOne({ user_id: operatorUserId });
         if (operator) {
           const lat = operator.last_lat;
           const lng = operator.last_lng;
           const lastSeen = operator.last_seen_at;
           
           operatorInfo = {
+            id: operatorUserId,
             name: operator.name || 'Operator',
             location: operator.last_address || operator.initial_address || (lat && lng ? 
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -373,13 +379,15 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     } else if (doc.assignedTo || doc.acceptedBy) {
       try {
         const operatorId = doc.assignedTo || doc.acceptedBy;
-        const operator = await db.collection('operators').findOne({ user_id: String(operatorId) });
+        const operatorUserId = String(operatorId);
+        const operator = await db.collection('operators').findOne({ user_id: operatorUserId });
         if (operator) {
           const lat = operator.last_lat;
           const lng = operator.last_lng;
           const lastSeen = operator.last_seen_at;
           
           operatorInfo = {
+            id: operatorUserId,
             name: operator.name || 'Operator',
             location: operator.last_address || operator.initial_address || (lat && lng ? 
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -434,6 +442,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       createdAt: doc?.createdAt ?? null,
       updatedAt: doc?.updatedAt ?? null,
       userId: doc?.userId ? String(doc.userId) : null,
+      acceptedBy: doc?.acceptedBy ? String(doc.acceptedBy) : null,
       operator: operatorInfo,
       user: clientInfo,
     };
@@ -464,14 +473,16 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
         
         let operatorInfo = null;
         if (assistDoc.status === 'completed' && assistDoc.completedBy) {
+          const operatorUserId = String(assistDoc.completedBy);
           try {
-            const operator = await db.collection('operators').findOne({ user_id: String(assistDoc.completedBy) });
+            const operator = await db.collection('operators').findOne({ user_id: operatorUserId });
             if (operator) {
               const lat = operator.last_lat;
               const lng = operator.last_lng;
               const lastSeen = operator.last_seen_at;
               
               operatorInfo = {
+                id: operatorUserId,
                 name: operator.name || 'Operator',
                 location: operator.last_address || (lat && lng ? 
                   `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -505,6 +516,7 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
           completedAt: assistDoc?.completedAt ?? null,
           createdAt: assistDoc?.createdAt ?? null,
           updatedAt: assistDoc?.updatedAt ?? null,
+          acceptedBy: assistDoc?.acceptedBy ? String(assistDoc.acceptedBy) : null,
           operator: operatorInfo,
         };
         
@@ -529,14 +541,16 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
           
           let operatorInfo = null;
           if (assistDoc.status === 'completed' && assistDoc.completedBy) {
+            const operatorUserId = String(assistDoc.completedBy);
             try {
-              const operator = await db.collection('operators').findOne({ user_id: String(assistDoc.completedBy) });
+              const operator = await db.collection('operators').findOne({ user_id: operatorUserId });
               if (operator) {
                 const lat = operator.last_lat;
                 const lng = operator.last_lng;
                 const lastSeen = operator.last_seen_at;
                 
                 operatorInfo = {
+                  id: operatorUserId,
                   name: operator.name || 'Operator',
                   location: operator.last_address || (lat && lng ? 
                     `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
@@ -569,6 +583,7 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
             completedAt: assistDoc?.completedAt ?? null,
             createdAt: assistDoc?.createdAt ?? null,
             updatedAt: assistDoc?.updatedAt ?? null,
+            acceptedBy: assistDoc?.acceptedBy ? String(assistDoc.acceptedBy) : null,
             operator: operatorInfo,
           };
           
@@ -636,16 +651,32 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
         );
         console.log(`Updated operator ${operatorId} location: ${lat}, ${lng}`);
       } else {
-        // Just update last seen time
-        await usersColl.updateOne(
+        // No coords in body: try to copy latest known coords from this user's record
+        const existing = await usersColl.findOne(
           { _id: operatorId },
           {
-            $set: {
-              last_seen_at: new Date(),
+            projection: {
+              last_lat: 1, last_lng: 1, last_address: 1,
+              initial_lat: 1, initial_lng: 1, initial_long: 1, initial_address: 1,
             }
           }
         );
-        console.log(`Updated operator ${operatorId} last seen time`);
+
+        const fallbackLat = existing?.last_lat ?? existing?.initial_lat ?? null;
+        const fallbackLng = existing?.last_lng ?? existing?.initial_lng ?? existing?.initial_long ?? null;
+        const fallbackAddr = existing?.last_address ?? existing?.initial_address ?? null;
+
+        const setDoc: any = { last_seen_at: new Date() };
+        if (fallbackLat != null && fallbackLng != null) {
+          setDoc.last_lat = Number(fallbackLat);
+          setDoc.last_lng = Number(fallbackLng);
+          if (fallbackAddr) setDoc.last_address = fallbackAddr;
+        }
+        await usersColl.updateOne(
+          { _id: operatorId },
+          { $set: setDoc }
+        );
+        console.log(`Updated operator ${operatorId} last seen; copied coords=${fallbackLat!=null && fallbackLng!=null}`);
       }
     } catch (locationError) {
       console.error('Error updating operator location:', locationError);
@@ -667,22 +698,38 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
       const participantsHash = [String(operatorId), String(clientUserId)].sort().join(':');
 
       // upsert the conversation by participantsHash; also link requestId
-      const conv = await conversationsColl.findOneAndUpdate(
-        { participantsHash },
-        {
-          $setOnInsert: {
-            members: [operatorId, clientUserId], // store as ObjectIds
-            createdAt: new Date(),
-          },
-          $set: {
-            requestId: new ObjectId(id),
-            updatedAt: new Date(),
-          },
-        },
-        { upsert: true, returnDocument: 'after' }
-      );
+      let conv = await conversationsColl.findOne({ participantsHash });
 
-      conversationId = String(conv.value?._id);
+      if (!conv) {
+        try {
+          conv = (
+            await conversationsColl.findOneAndUpdate(
+              { participantsHash },
+              {
+                $setOnInsert: {
+                  participants: [operatorId, clientUserId], // store as ObjectIds
+                  createdAt: new Date(),
+                },
+                $set: {
+                  requestId: new ObjectId(id),
+                  updatedAt: new Date(),
+                },
+              },
+              { upsert: true, returnDocument: 'after' }
+            )
+          ).value;
+        } catch (err: any) {
+          if (err?.code === 11000) {
+            conv = await conversationsColl.findOne({ participantsHash });
+          } else {
+            throw err;
+          }
+        }
+      } else if (!conv.requestId && isValidOid(id)) {
+        await conversationsColl.updateOne({ _id: conv._id }, { $set: { requestId: new ObjectId(id) } }).catch(() => void 0);
+      }
+
+      conversationId = conv ? String(conv._id) : undefined;
 
       // Ensure ConversationMeta for both sides (unread counters exist)
       const metaOps = [
@@ -720,6 +767,19 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
         });
       } catch {
         // socket not initialized or client offline; that's fine
+      }
+
+      // Push notify client
+      try {
+        if (doc?.userId) {
+          await sendPushToUserIds([String(doc.userId)], {
+            title: 'Request accepted',
+            body: 'An operator is en route. Tap to open the chat.',
+            data: { type: 'assist', requestId: String(id), conversationId },
+          });
+        }
+      } catch (e) {
+        console.warn('[push] assist accepted push failed:', (e as Error).message);
       }
     }
 
@@ -828,6 +888,7 @@ router.post('/:id/complete', requireAuth, async (req, res, next) => {
         endName,
         endAddr,
 
+        acceptedBy: doc.acceptedBy ? String(doc.acceptedBy) : null,
         rating: doc.rating ?? (rating ?? null),
       },
     });

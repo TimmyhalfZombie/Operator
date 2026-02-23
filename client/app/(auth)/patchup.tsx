@@ -1,7 +1,7 @@
-// client/app/(auth)/patching-up.tsx
-import React, { useEffect, useState } from 'react';
-import { SafeAreaView, View, Text, StyleSheet, StatusBar, BackHandler } from 'react-native';
+// client/app/(auth)/patchup.tsx
 import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { BackHandler, SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native';
 
 export default function PatchingUpScreen() {
   const [dots, setDots] = useState('');

@@ -1,0 +1,27 @@
+﻿diff --git a/client/app/_layout.tsx b/client/app/_layout.tsx
+index 66c5237..46022f2 100644
+--- a/client/app/_layout.tsx
++++ b/client/app/_layout.tsx
+@@ -8,18 +8,20 @@ import { tokens } from '../src/auth/tokenStore';
+ import { DeclinedRequestsProvider } from '../src/contexts/DeclinedRequestsContext';
+ import { useImmersiveMode } from '../src/hooks/useImmersiveMode';
+ 
+-SplashScreen.preventAutoHideAsync().catch(() => {});
++SplashScreen.preventAutoHideAsync().catch(() => { });
+ 
+ export default function RootLayout() {
+   const [fontsLoaded] = useFonts({
+     Candal: require('../assets/fonts/Candal-Regular.ttf'),
+     'Inter-Black': require('../assets/fonts/static/Inter_18pt-Black.ttf'),
++    'Inter-Bold': require('../assets/fonts/static/Inter_18pt-Bold.ttf'),
++    'Inter-SemiBold': require('../assets/fonts/static/Inter_18pt-SemiBold.ttf'),
+     'Inter-Medium': require('../assets/fonts/static/Inter_18pt-Medium.ttf'),
+     'Inter-Regular': require('../assets/fonts/static/Inter_18pt-Regular.ttf'),
+   });
+ 
+   const [tokensReady, setTokensReady] = useState(false);
+-  
++
+   // Enable immersive mode
+   useImmersiveMode();
+ 

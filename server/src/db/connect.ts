@@ -82,6 +82,29 @@ async function safeEnsureIndex(
 }
 
 async function ensureAuthIndexes(d: Db) {
+  // Drop legacy/incompatible unique indexes that enforce uniqueness on null/missing values
+  // so that email/phone can truly be optional. We only keep indexes that have the
+  // intended partialFilterExpression.
+  const users = d.collection('users');
+  const existing = await users.indexes();
+  for (const idx of existing) {
+    const keyStr = JSON.stringify(idx.key);
+    const isEmailIdx = keyStr === JSON.stringify({ email: 1 });
+    const isPhoneIdx = keyStr === JSON.stringify({ phone: 1 });
+    if ((isEmailIdx || isPhoneIdx) && idx.unique) {
+      const pfe: any = (idx as any).partialFilterExpression;
+      const pfeOk = pfe && ((isEmailIdx && pfe.email && pfe.email.$type === 'string') || (isPhoneIdx && pfe.phone && pfe.phone.$type === 'string'));
+      if (!pfeOk) {
+        try {
+          await users.dropIndex(idx.name);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(`Could not drop legacy index ${idx.name}:`, (e as Error).message);
+        }
+      }
+    }
+  }
+
   await safeEnsureIndex(d, 'users', { email: 1 }, {
     unique: true,
     name: 'email_unique_when_present',
