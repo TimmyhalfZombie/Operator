@@ -185,7 +185,7 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
     const items = await Promise.all(docs.map(async (d) => {
       let operatorInfo = null;
       let clientInfo = null;
-      
+
       // For completed requests, show the operator who completed it
       if (d.status === 'completed' && d.completedBy) {
         const operatorUserId = String(d.completedBy);
@@ -195,11 +195,11 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
             const lastSeen = operator.last_seen_at;
-            
+
             operatorInfo = {
               id: operatorUserId,
               name: operator.name || 'Operator',
-              location: operator.last_address || operator.initial_address || (lat && lng ? 
+              location: operator.last_address || operator.initial_address || (lat && lng ?
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
               initial_address: operator.initial_address || null,
               lastSeen: lastSeen || null,
@@ -220,11 +220,11 @@ router.get('/inbox', requireAuth, async (req, res, next) => {
             const lat = operator.last_lat;
             const lng = operator.last_lng;
             const lastSeen = operator.last_seen_at;
-            
+
             operatorInfo = {
               id: operatorUserId,
               name: operator.name || 'Operator',
-              location: operator.last_address || operator.initial_address || (lat && lng ? 
+              location: operator.last_address || operator.initial_address || (lat && lng ?
                 `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
               initial_address: operator.initial_address || null,
               lastSeen: lastSeen || null,
@@ -336,7 +336,7 @@ router.get('/next', requireAuth, async (_req, res, next) => {
 router.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: 'Invalid id' });
     }
@@ -350,7 +350,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     }
 
     const coords = extractCoords(doc);
-    
+
     // Get operator information if available
     let operatorInfo = null;
     if (doc.status === 'completed' && doc.completedBy) {
@@ -361,17 +361,17 @@ router.get('/:id', requireAuth, async (req, res, next) => {
           const lat = operator.last_lat;
           const lng = operator.last_lng;
           const lastSeen = operator.last_seen_at;
-          
+
           operatorInfo = {
             id: operatorUserId,
             name: operator.name || 'Operator',
-            location: operator.last_address || operator.initial_address || (lat && lng ? 
+            location: operator.last_address || operator.initial_address || (lat && lng ?
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
             initial_address: operator.initial_address || null,
-              lastSeen: lastSeen || null,
-              acceptedAt: doc.updatedAt || doc.updated_at || null,
-              avatar: operator.avatar || null,
-            };
+            lastSeen: lastSeen || null,
+            acceptedAt: doc.updatedAt || doc.updated_at || null,
+            avatar: operator.avatar || null,
+          };
         }
       } catch (e) {
         // Error fetching operator info - silently continue
@@ -385,30 +385,30 @@ router.get('/:id', requireAuth, async (req, res, next) => {
           const lat = operator.last_lat;
           const lng = operator.last_lng;
           const lastSeen = operator.last_seen_at;
-          
+
           operatorInfo = {
             id: operatorUserId,
             name: operator.name || 'Operator',
-            location: operator.last_address || operator.initial_address || (lat && lng ? 
+            location: operator.last_address || operator.initial_address || (lat && lng ?
               `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
             initial_address: operator.initial_address || null,
-              lastSeen: lastSeen || null,
-              acceptedAt: doc.updatedAt || doc.updated_at || null,
-              avatar: operator.avatar || null,
-            };
+            lastSeen: lastSeen || null,
+            acceptedAt: doc.updatedAt || doc.updated_at || null,
+            avatar: operator.avatar || null,
+          };
         }
       } catch (e) {
         // Error fetching operator info - silently continue
       }
     }
-    
+
     // Get client information including avatar
     let clientInfo = null;
     if (doc.userId) {
       try {
         const customerDb = getCustomerDb();
         const client = await customerDb.collection('users').findOne({ _id: new ObjectId(String(doc.userId)) });
-        
+
         if (client) {
           clientInfo = {
             name: client.name || null,
@@ -446,7 +446,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       operator: operatorInfo,
       user: clientInfo,
     };
-    
+
     res.json(response);
   } catch (e) {
     next(e);
@@ -459,18 +459,18 @@ router.get('/:id', requireAuth, async (req, res, next) => {
 router.get('/resolve/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     const db = getCustomerDb();
-    
+
     // First try as assistance request
     if (ObjectId.isValid(id)) {
       const assistColl = db.collection('assistrequests');
       const assistDoc = await assistColl.findOne({ _id: new ObjectId(id) });
-      
+
       if (assistDoc) {
         // Return the assistance request data
         const coords = extractCoords(assistDoc);
-        
+
         let operatorInfo = null;
         if (assistDoc.status === 'completed' && assistDoc.completedBy) {
           const operatorUserId = String(assistDoc.completedBy);
@@ -480,11 +480,11 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
               const lat = operator.last_lat;
               const lng = operator.last_lng;
               const lastSeen = operator.last_seen_at;
-              
+
               operatorInfo = {
                 id: operatorUserId,
                 name: operator.name || 'Operator',
-                location: operator.last_address || (lat && lng ? 
+                location: operator.last_address || (lat && lng ?
                   `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
                 lastSeen: lastSeen || null,
                 acceptedAt: assistDoc.updatedAt || assistDoc.updated_at || null,
@@ -495,7 +495,7 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
             // Error fetching operator info - silently continue
           }
         }
-        
+
         const response = {
           id: String(assistDoc._id),
           status: assistDoc.status,
@@ -519,26 +519,26 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
           acceptedBy: assistDoc?.acceptedBy ? String(assistDoc.acceptedBy) : null,
           operator: operatorInfo,
         };
-        
+
         return res.json(response);
       }
     }
-    
+
     // If not found as assistance request, try as activity
     const activityColl = db.collection('activities');
     const activityDoc = await activityColl.findOne({ _id: new ObjectId(id) });
-    
+
     if (activityDoc) {
       // Get the related assistance request
       const assistId = activityDoc.assistId || activityDoc.requestId || activityDoc.assistanceId;
       if (assistId && ObjectId.isValid(assistId)) {
         const assistColl = db.collection('assistrequests');
         const assistDoc = await assistColl.findOne({ _id: new ObjectId(assistId) });
-        
+
         if (assistDoc) {
           // Return the assistance request data (same as above)
           const coords = extractCoords(assistDoc);
-          
+
           let operatorInfo = null;
           if (assistDoc.status === 'completed' && assistDoc.completedBy) {
             const operatorUserId = String(assistDoc.completedBy);
@@ -548,11 +548,11 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
                 const lat = operator.last_lat;
                 const lng = operator.last_lng;
                 const lastSeen = operator.last_seen_at;
-                
+
                 operatorInfo = {
                   id: operatorUserId,
                   name: operator.name || 'Operator',
-                  location: operator.last_address || (lat && lng ? 
+                  location: operator.last_address || (lat && lng ?
                     `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Location unknown'),
                   lastSeen: lastSeen || null,
                   acceptedAt: assistDoc.updatedAt || assistDoc.updated_at || null,
@@ -562,7 +562,7 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
               // Error fetching operator info - silently continue
             }
           }
-          
+
           const response = {
             id: String(assistDoc._id),
             status: assistDoc.status,
@@ -586,12 +586,12 @@ router.get('/resolve/:id', requireAuth, async (req, res, next) => {
             acceptedBy: assistDoc?.acceptedBy ? String(assistDoc.acceptedBy) : null,
             operator: operatorInfo,
           };
-          
+
           return res.json(response);
         }
       }
     }
-    
+
     return res.status(404).json({ message: 'Request not found' });
   } catch (e) {
     console.error('[Server] Error in resolve endpoint:', e);
@@ -623,7 +623,7 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
       { returnDocument: 'after' }
     );
 
-    if (!result || !result.value) {
+    if (!result) {
       return res.status(404).json({ message: 'Request not found or not pending' });
     }
 
@@ -632,10 +632,10 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
       const authDb = getAuthDb();
       const usersColl = authDb.collection('users');
       const operatorId = new ObjectId((req as any).user.id);
-      
+
       // Get current location from request body or use initial location
       const { lat, lng, address } = req.body || {};
-      
+
       if (lat && lng) {
         // Update with provided location
         await usersColl.updateOne(
@@ -676,7 +676,7 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
           { _id: operatorId },
           { $set: setDoc }
         );
-        console.log(`Updated operator ${operatorId} last seen; copied coords=${fallbackLat!=null && fallbackLng!=null}`);
+        console.log(`Updated operator ${operatorId} last seen; copied coords=${fallbackLat != null && fallbackLng != null}`);
       }
     } catch (locationError) {
       console.error('Error updating operator location:', locationError);
@@ -684,7 +684,7 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
     }
 
     // 2) Ensure a single shared conversation between operator and client
-    const doc = result.value as any;
+    const doc = (result as any).value || result;
     const operatorId = new Types.ObjectId((req as any).user.id);
     const clientUserId = doc.userId ? new Types.ObjectId(doc.userId) : null;
 
@@ -702,22 +702,22 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
 
       if (!conv) {
         try {
-          conv = (
-            await conversationsColl.findOneAndUpdate(
-              { participantsHash },
-              {
-                $setOnInsert: {
-                  participants: [operatorId, clientUserId], // store as ObjectIds
-                  createdAt: new Date(),
-                },
-                $set: {
-                  requestId: new ObjectId(id),
-                  updatedAt: new Date(),
-                },
+          const resConv = await conversationsColl.findOneAndUpdate(
+            { participantsHash },
+            {
+              $setOnInsert: {
+                participants: [operatorId, clientUserId], // store as ObjectIds
+                createdAt: new Date(),
               },
-              { upsert: true, returnDocument: 'after' }
-            )
-          ).value;
+              $set: {
+                requestId: new ObjectId(id),
+                updatedAt: new Date(),
+              },
+            },
+            { upsert: true, returnDocument: 'after' }
+          );
+
+          conv = resConv && (resConv as any).value ? (resConv as any).value : resConv;
         } catch (err: any) {
           if (err?.code === 11000) {
             conv = await conversationsColl.findOne({ participantsHash });
@@ -725,33 +725,35 @@ router.post('/:id/accept', requireAuth, async (req, res, next) => {
             throw err;
           }
         }
-      } else if (!conv.requestId && isValidOid(id)) {
+      } else if (!conv.requestId && ObjectId.isValid(id)) {
         await conversationsColl.updateOne({ _id: conv._id }, { $set: { requestId: new ObjectId(id) } }).catch(() => void 0);
       }
 
       conversationId = conv ? String(conv._id) : undefined;
 
       // Ensure ConversationMeta for both sides (unread counters exist)
-      const metaOps = [
-        {
-          updateOne: {
-            filter: { conversationId: conv.value!._id, userId: operatorId },
-            update: { $setOnInsert: { unread: 0 } },
-            upsert: true,
+      if (conv) {
+        const metaOps = [
+          {
+            updateOne: {
+              filter: { conversationId: conv._id, userId: operatorId },
+              update: { $setOnInsert: { unread: 0 } },
+              upsert: true,
+            },
           },
-        },
-        {
-          updateOne: {
-            filter: { conversationId: conv.value!._id, userId: clientUserId },
-            update: { $setOnInsert: { unread: 0 } },
-            upsert: true,
+          {
+            updateOne: {
+              filter: { conversationId: conv._id, userId: clientUserId },
+              update: { $setOnInsert: { unread: 0 } },
+              upsert: true,
+            },
           },
-        },
-      ];
-      try {
-        await metasColl.bulkWrite(metaOps as any, { ordered: false });
-      } catch {
-        // ignore best-effort
+        ];
+        try {
+          await metasColl.bulkWrite(metaOps as any, { ordered: false });
+        } catch {
+          // ignore best-effort
+        }
       }
 
       // 3) Notify the client app with the shared conversationId (if socket available)
@@ -815,7 +817,7 @@ router.post('/:id/decline', requireAuth, async (req, res, next) => {
       { returnDocument: 'after' }
     );
 
-    if (!result || !result.value) {
+    if (!result) {
       return res.status(400).json({ message: 'Request cannot be declined in current status' });
     }
 
@@ -857,9 +859,9 @@ router.post('/:id/complete', requireAuth, async (req, res, next) => {
       { returnDocument: 'after' }
     );
 
-    if (!result || !result.value) return res.status(404).json({ message: 'Request not found' });
+    if (!result) return res.status(404).json({ message: 'Request not found' });
 
-    const doc: any = result.value;
+    const doc: any = result;
 
     // Build a rich payload for the Activity detail screen
     const endName = pickPlaceName(doc);

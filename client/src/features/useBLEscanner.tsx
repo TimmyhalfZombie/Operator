@@ -1,5 +1,5 @@
 import { Buffer } from 'buffer';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { BleManager, Device, State, Subscription } from 'react-native-ble-plx';
 
@@ -11,14 +11,14 @@ export function useBleScanner() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(null);
   const [needsBluetooth, setNeedsBluetooth] = useState(false);
-  
+
   // Universal scanning state
   const [universalScanning, setUniversalScanning] = useState(false);
   const [universalDevices, setUniversalDevices] = useState<Device[]>([]);
 
   // UUIDs (match your ESP32)
   const LED_SERVICE_UUID = 'c191e8aa-fb8a-4c7a-8750-5eb91c7c794a';
-  const LED_CHAR_UUID    = 'c191e8ab-fb8a-4c7a-8750-5eb91c7c794a';
+  const LED_CHAR_UUID = 'c191e8ab-fb8a-4c7a-8750-5eb91c7c794a';
 
   // --- Notification monitor state
   const notifSubRef = useRef<Subscription | null>(null);
@@ -67,52 +67,56 @@ export function useBleScanner() {
   };
 
   // --- Notifications: subscribe / unsubscribe
-  const startNotifications = async () => {
+  const startNotifications = useCallback(async () => {
     // If already monitoring, do nothing
     if (notifSubRef.current) return;
 
-    const dev = await getConnectedDevice();
+    try {
+      const dev = await getConnectedDevice();
 
-    // Start monitor; react-native-ble-plx enables CCCD automatically
-    const sub = dev.monitorCharacteristicForService(
-      LED_SERVICE_UUID,
-      LED_CHAR_UUID,
-      (error, ch) => {
-        if (error) {
-          console.log('Notify error:', error.message);
-          return;
+      // Start monitor; react-native-ble-plx enables CCCD automatically
+      const sub = dev.monitorCharacteristicForService(
+        LED_SERVICE_UUID,
+        LED_CHAR_UUID,
+        (error, ch) => {
+          if (error) {
+            // console.log('Notify error:', error.message);
+            return;
+          }
+          if (!ch?.value) return;
+
+          try {
+            const msg = Buffer.from(ch.value, 'base64').toString('utf8').trim();
+            // Fan out to all listeners
+            notifListenersRef.current.forEach(fn => {
+              try { fn(msg); } catch { }
+            });
+          } catch (e) {
+            // console.log('Notify decode error:', e);
+          }
         }
-        if (!ch?.value) return;
+      );
 
-        try {
-          const msg = Buffer.from(ch.value, 'base64').toString('utf8').trim();
-          // Fan out to all listeners
-          notifListenersRef.current.forEach(fn => {
-            try { fn(msg); } catch {}
-          });
-        } catch (e) {
-          console.log('Notify decode error:', e);
-        }
-      }
-    );
+      notifSubRef.current = sub;
+      // console.log('Notifications started.');
+    } catch (e) {
+      // console.log('startNotifications failed:', e);
+    }
+  }, []); // no external deps that change often needed here
 
-    notifSubRef.current = sub;
-    console.log('Notifications started.');
-  };
-
-  const stopNotifications = () => {
+  const stopNotifications = useCallback(() => {
     try {
       notifSubRef.current?.remove?.();
-    } catch {}
+    } catch { }
     notifSubRef.current = null;
-    console.log('Notifications stopped.');
-  };
+    // console.log('Notifications stopped.');
+  }, []);
 
   /**
    * Public API: subscribe to status messages.
    * Returns an unsubscribe function for the caller.
    */
-  const subscribeToNotifications = (cb: (msg: string) => void) => {
+  const subscribeToNotifications = useCallback((cb: (msg: string) => void) => {
     notifListenersRef.current.add(cb);
 
     // Attempt to ensure a live monitor
@@ -125,7 +129,7 @@ export function useBleScanner() {
         stopNotifications();
       }
     };
-  };
+  }, [startNotifications, stopNotifications]);
 
   // Listen for disconnects; DO NOT destroy the manager on unmount
   useEffect(() => {

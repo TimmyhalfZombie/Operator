@@ -96,7 +96,9 @@ async function ensureAuthIndexes(d: Db) {
       const pfeOk = pfe && ((isEmailIdx && pfe.email && pfe.email.$type === 'string') || (isPhoneIdx && pfe.phone && pfe.phone.$type === 'string'));
       if (!pfeOk) {
         try {
-          await users.dropIndex(idx.name);
+          if (idx.name) {
+            await users.dropIndex(idx.name);
+          }
         } catch (e) {
           // eslint-disable-next-line no-console
           console.warn(`Could not drop legacy index ${idx.name}:`, (e as Error).message);

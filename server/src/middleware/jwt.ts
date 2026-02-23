@@ -1,24 +1,24 @@
+import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 
 /** Public shape we attach to req.user */
 export type JwtUser = { id: string; email?: string };
 
 /** Use separate secrets and TTLs; fall back to legacy config if envs are missing */
-const ACCESS_SECRET  = process.env.JWT_SECRET || config.jwtSecret;
+const ACCESS_SECRET = process.env.JWT_SECRET || config.jwtSecret;
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || config.jwtSecret;
 
-const ACCESS_EXPIRES  = process.env.JWT_ACCESS_TTL  || '15m';
+const ACCESS_EXPIRES = process.env.JWT_ACCESS_TTL || '15m';
 const REFRESH_EXPIRES = process.env.JWT_REFRESH_TTL || '30d';
 
 /** Helpers to sign tokens */
 export function signAccess(user: JwtUser) {
   // Standardize on sub for user id
-  return jwt.sign({ sub: user.id, email: user.email }, ACCESS_SECRET, { expiresIn: ACCESS_EXPIRES });
+  return jwt.sign({ sub: user.id, email: user.email }, ACCESS_SECRET as string, { expiresIn: ACCESS_EXPIRES as any });
 }
 export function signRefresh(user: JwtUser, jti?: string) {
-  return jwt.sign({ sub: user.id, jti }, REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES });
+  return jwt.sign({ sub: user.id, jti }, REFRESH_SECRET as string, { expiresIn: REFRESH_EXPIRES as any });
 }
 
 /** Extract Bearer token from Authorization header */

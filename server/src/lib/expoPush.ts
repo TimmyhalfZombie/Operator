@@ -77,9 +77,9 @@ export async function sendPushToTokens(
           .collection('users')
           .updateMany(
             { expoPushTokens: { $in: bad } },
-            { $pull: { expoPushTokens: { $in: bad } } }
+            { $pull: { expoPushTokens: { $in: bad } } as any }
           );
-      } catch {}
+      } catch { }
     }
   }
   return { ok: true, results };
@@ -94,7 +94,7 @@ export async function sendPushToUserIds(
     try {
       const tks = await fetchUserTokens(uid);
       allTokens.push(...tks);
-    } catch {}
+    } catch { }
   }
   if (!allTokens.length) return { ok: true, sent: 0 };
 

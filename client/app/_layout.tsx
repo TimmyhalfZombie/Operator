@@ -3,13 +3,13 @@ import { useFonts } from 'expo-font';
 import { router, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { tokens } from '../src/auth/tokenStore';
 import { DeclinedRequestsProvider } from '../src/contexts/DeclinedRequestsContext';
 import { useImmersiveMode } from '../src/hooks/useImmersiveMode';
 import { onNotificationResponse } from '../src/services/notificationService';
 
-SplashScreen.preventAutoHideAsync().catch(() => {});
+SplashScreen.preventAutoHideAsync().catch(() => { });
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -56,9 +56,9 @@ export default function RootLayout() {
 
   const ready = fontsLoaded && authReady;
 
-  const onLayoutRootView = useCallback(async () => {
+  useEffect(() => {
     if (ready) {
-      await SplashScreen.hideAsync();
+      SplashScreen.hideAsync();
     }
   }, [ready]);
 
@@ -67,7 +67,7 @@ export default function RootLayout() {
   return (
     <DeclinedRequestsProvider>
       <StatusBar style="light" hidden={false} />
-      <Stack screenOptions={{ headerShown: false }} onLayout={onLayoutRootView} />
+      <Stack screenOptions={{ headerShown: false }} />
     </DeclinedRequestsProvider>
   );
 }

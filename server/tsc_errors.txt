@@ -1,0 +1,25 @@
+﻿src/db/connect.ts(99,33): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/lib/cloudinary.ts(1,34): error TS2307: Cannot find module 'cloudinary' or its corresponding type declarations.
+src/lib/expoPush.ts(80,15): error TS2322: Type '{ expoPushTokens: { $in: string[]; }; }' is not assignable to type 'PullOperator<Document>'.
+  Type '{ expoPushTokens: { $in: string[]; }; }' is not assignable to type 'NotAcceptedFields<Document, readonly any[]>'.
+    Property 'expoPushTokens' is incompatible with index signature.
+      Type '{ $in: string[]; }' is not assignable to type 'undefined'.
+src/middleware/jwt.ts(18,14): error TS2769: No overload matches this call.
+  Overload 1 of 5, '(payload: string | object | Buffer<ArrayBufferLike>, secretOrPrivateKey: null, options?: (SignOptions & { algorithm: "none"; }) | undefined): string', gave the following error.
+    Argument of type 'string' is not assignable to parameter of type 'null'.
+  Overload 2 of 5, '(payload: string | object | Buffer<ArrayBufferLike>, secretOrPrivateKey: Buffer<ArrayBufferLike> | Secret | PrivateKeyInput | JsonWebKeyInput, options?: SignOptions | undefined): string', gave the following error.
+    Type 'string' is not assignable to type 'number | StringValue | undefined'.
+  Overload 3 of 5, '(payload: string | object | Buffer<ArrayBufferLike>, secretOrPrivateKey: Buffer<ArrayBufferLike> | Secret | PrivateKeyInput | JsonWebKeyInput, callback: SignCallback): void', gave the following error.
+    Object literal may only specify known properties, and 'expiresIn' does not exist in type 'SignCallback'.
+src/middleware/jwt.ts(21,14): error TS2769: No overload matches this call.
+  Overload 1 of 5, '(payload: string | object | Buffer<ArrayBufferLike>, secretOrPrivateKey: null, options?: (SignOptions & { algorithm: "none"; }) | undefined): string', gave the following error.
+    Argument of type 'string' is not assignable to parameter of type 'null'.
+  Overload 2 of 5, '(payload: string | object | Buffer<ArrayBufferLike>, secretOrPrivateKey: Buffer<ArrayBufferLike> | Secret | PrivateKeyInput | JsonWebKeyInput, options?: SignOptions | undefined): string', gave the following error.
+    Type 'string' is not assignable to type 'number | StringValue | undefined'.
+  Overload 3 of 5, '(payload: string | object | Buffer<ArrayBufferLike>, secretOrPrivateKey: Buffer<ArrayBufferLike> | Secret | PrivateKeyInput | JsonWebKeyInput, callback: SignCallback): void', gave the following error.
+    Object literal may only specify known properties, and 'expiresIn' does not exist in type 'SignCallback'.
+src/routes/assist.ts(705,18): error TS2531: Object is possibly 'null'.
+src/routes/assist.ts(728,37): error TS2304: Cannot find name 'isValidOid'.
+src/routes/assist.ts(738,39): error TS18047: 'conv' is possibly 'null'.
+src/routes/assist.ts(745,39): error TS18047: 'conv' is possibly 'null'.
